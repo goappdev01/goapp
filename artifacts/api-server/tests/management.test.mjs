@@ -21,6 +21,7 @@ test('owner management denies cross-business writes and preserves server-owned f
   if(u.pathname.endsWith('/user'))return Response.json({id});
   if(init.method==='GET'&&u.pathname.endsWith('/businesses')){assert.equal(u.searchParams.get('owner_id'),`eq.${id}`);return Response.json(owner?[{id,timezone:'Europe/Madrid',verified:true}]:[]);}
   if(init.method==='GET'&&u.pathname.endsWith('/staff'))return Response.json([]);
+  if(u.pathname.includes('/storage/v1/object/go-catalog-photos/')){writes.push({uploadPath:u.pathname,bytes:init.body.length});return Response.json({Key:u.pathname},{status:200});}
   writes.push(JSON.parse(init.body));return Response.json([{id,...writes.at(-1)}],{status:init.method==='POST'?201:200});
  };
  const req=(route,body,auth=true,method='POST')=>fetchOriginal(`http://127.0.0.1:${server.address().port}${route}`,{method,headers:{'Content-Type':'application/json',...(auth?{Authorization:'Bearer test'}:{})},body:JSON.stringify(body)});
@@ -44,8 +45,15 @@ test('owner management denies cross-business writes and preserves server-owned f
   assert.equal((await req(`/businesses/${id}/availability`,{weekday:1,start_time:'22:00',end_time:'22:00',ui_metadata:{endNextDay:true}})).status,400);
   assert.equal((await req(`/businesses/${id}/availability`,{weekday:1,start_time:'09:00',end_time:'10:00',ui_metadata:{endNextDay:'true'}})).status,400);
   assert.equal((await req(`/businesses/${id}/availability`,{weekday:1,start_time:'09:00',end_time:'10:00',staff_id:id})).status,400);
+  const image=Buffer.concat([Buffer.from([255,216]),Buffer.alloc(110),Buffer.from([255,217])]);
+  const upload=await req(`/businesses/${id}/catalog-photos`,{mime_type:'image/jpeg',content_base64:image.toString('base64')});
+  assert.equal(upload.status,201);assert.match((await upload.json()).photoUri,new RegExp(`^go-storage:${id}/[0-9a-f-]+\\.jpg$`));
+  assert.equal(writes.at(-1).bytes,image.length);
+  assert.equal((await req(`/businesses/${id}/catalog-photos`,{mime_type:'image/jpeg',content_base64:Buffer.from('not an image').toString('base64')})).status,400);
+  assert.equal((await req(`/businesses/${id}/services`,{name:'Cita',duration_minutes:30,price:25,ui_metadata:{photoUri:'go-storage:33333333-3333-4333-8333-333333333333/22222222-2222-4222-8222-222222222222.jpg'}})).status,400);
   owner=false;const count=writes.length;
   assert.equal((await req(`/businesses/${id}/services`,{name:'Cita',duration_minutes:30,price:25})).status,404);
+  assert.equal((await req(`/businesses/${id}/catalog-photos`,{mime_type:'image/jpeg',content_base64:image.toString('base64')})).status,404);
   assert.equal((await req(`/businesses/${id}`,{name:'Intruso'},true,'PATCH')).status,404);
   assert.equal(writes.length,count);
  }finally{globalThis.fetch=fetchOriginal;await new Promise(r=>server.close(r));await rm(dir,{recursive:true,force:true});}

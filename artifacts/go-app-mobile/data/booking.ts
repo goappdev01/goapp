@@ -414,8 +414,11 @@ function mapRemoteBusiness(row: RemoteBusiness): Business {
 }
 
 /** Public service metadata may contain only a bundled reference or an explicit removal. */
-function isCatalogReferenceSyntax(value: unknown): value is string {
+function isCatalogReferenceSyntax(value: unknown): boolean {
   return typeof value === "string" && /^demo-catalog:[a-z0-9-]{1,64}$/.test(value);
+}
+export function isCatalogStorageReference(value: unknown): value is string {
+  return typeof value === "string" && /^go-storage:[0-9a-f-]{36}\/[0-9a-f-]{36}\.(?:jpg|png)$/i.test(value);
 }
 function mapRemoteService(row: RemoteService): BookableItem {
   return {
@@ -436,8 +439,8 @@ function mapRemoteService(row: RemoteService): BookableItem {
     active: row.active !== false,
     visible: row.ui_metadata?.visible ?? row.active !== false,
     timing: row.ui_metadata?.timing,
-    photoUri: isCatalogReferenceSyntax(row.ui_metadata?.photoUri) || row.ui_metadata?.photoUri === "none"
-      ? row.ui_metadata.photoUri : undefined,
+    photoUri: isCatalogReferenceSyntax(row.ui_metadata?.photoUri) || isCatalogStorageReference(row.ui_metadata?.photoUri) || row.ui_metadata?.photoUri === "none"
+      ? row.ui_metadata?.photoUri : undefined,
   };
 }
 
@@ -598,9 +601,36 @@ export async function getCloudConfiguration<T>(businessId?: string, expectedUser
 export async function saveCloudConfiguration(businessId: string, payload: unknown): Promise<void> {
   await supabaseApiRequest(`${management}/businesses/${businessId}/configuration`, { method: "PUT", body: JSON.stringify({ payload }) }, true);
 }
+export async function getCatalogPhotoPreference(expectedUserId: string): Promise<boolean> {
+  const result = await supabaseApiRequest<{ showPhotos: boolean }>("/supabase/catalog-photo-preference", {}, true, expectedUserId);
+  if (typeof result?.showPhotos !== "boolean") throw new BookingApiError("Preferencia de fotos inválida.", 502);
+  return result.showPhotos;
+}
+export async function saveCatalogPhotoPreference(value: boolean, expectedUserId: string): Promise<void> {
+  const result = await supabaseApiRequest<{ showPhotos: boolean }>("/supabase/catalog-photo-preference",
+    { method: "PUT", body: JSON.stringify({ showPhotos: value }) }, true, expectedUserId);
+  if (result?.showPhotos !== value) throw new BookingApiError("No se confirmó la preferencia de fotos.", 502);
+}
+export async function uploadCatalogPhoto(businessId: string, mimeType: "image/jpeg" | "image/png", contentBase64: string): Promise<string> {
+  if (!isCloudId(businessId)) throw new BookingApiError("Selecciona una empresa real válida.", 400);
+  const result = await supabaseApiRequest<{ photoUri: string }>(`${management}/businesses/${businessId}/catalog-photos`,
+    { method: "POST", body: JSON.stringify({ mime_type: mimeType, content_base64: contentBase64 }) }, true);
+  const photoUri: unknown = result?.photoUri;
+  if (!isCatalogStorageReference(photoUri) || !photoUri.startsWith(`go-storage:${businessId}/`))
+    throw new BookingApiError("No se confirmó la fotografía de esta empresa.", 502);
+  return photoUri;
+}
+export async function getCatalogPhotoUrl(photoUri: string, expectedUserId: string): Promise<string> {
+  if (!isCatalogStorageReference(photoUri)) throw new BookingApiError("Fotografía inválida.", 400);
+  const result = await supabaseApiRequest<{ url: string }>(`/supabase/catalog-photo-url?${new URLSearchParams({ ref: photoUri })}`, {}, true, expectedUserId);
+  if (typeof result?.url !== "string" || !result.url.startsWith("https://") || !result.url.includes("/storage/v1/object/sign/go-catalog-photos/"))
+    throw new BookingApiError("No se pudo verificar la fotografía.", 502);
+  return result.url;
+}
 function serviceBody(item: Omit<BookableItem, "id">) {
-  if (item.photoUri !== undefined && item.photoUri !== "none" && !isCatalogReferenceSyntax(item.photoUri))
-    throw new BookingApiError("La fotografía del catálogo no es una imagen de ejemplo válida.", 400);
+  if (item.photoUri !== undefined && item.photoUri !== "none" && !isCatalogReferenceSyntax(item.photoUri)
+    && !(isCatalogStorageReference(item.photoUri) && item.photoUri.startsWith(`go-storage:${item.businessId}/`)))
+    throw new BookingApiError("La fotografía del catálogo no pertenece a esta empresa.", 400);
   const pending = item.timing?.configurationStatus === "pending" || item.catalogMetadata?.timingConfigurationPending === true
     || Object.values(item.timing?.professionalTimings ?? {}).some(timing => timing.configurationStatus === "pending");
   return { name: item.title, duration_minutes: item.durationMinutes, price: item.price, currency: "EUR", active: pending ? false : item.active,

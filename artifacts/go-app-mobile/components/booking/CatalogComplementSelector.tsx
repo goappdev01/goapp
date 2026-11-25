@@ -4,7 +4,7 @@ import { quoteCatalog, toggleCatalogOption, type CatalogQuote } from "@/data/cat
 import { useLanguage } from "@/contexts/LanguageContext";
 import { onSessionChanged } from "@/lib/sessionEvents";
 import { CatalogItemPhoto } from "./CatalogPhotoView";
-import type { BookableItem } from "@/data/booking";
+import { getBookableItems, type BookableItem } from "@/data/booking";
 
 export function CatalogQuoteBreakdown({ quote, showTotal = true, accentColor = "#65b883", individual = false }: { quote: CatalogQuote; showTotal?: boolean; accentColor?: string; individual?: boolean }) {
   const { lang } = useLanguage();
@@ -36,7 +36,8 @@ export function CatalogComplementSelector({ businessId, rootIds, onChange, repos
   const [photoItems, setPhotoItems] = useState<BookableItem[]>([]);
   useEffect(() => {
     let current = true; setPhotoItems([]);
-    if (repository && showPhotos) void repository.getCatalogItems(businessId).then(items => { if (current) setPhotoItems(items); }).catch(() => {});
+    if (showPhotos) void (repository ? repository.getCatalogItems(businessId) : getBookableItems(businessId, true))
+      .then(items => { if (current) setPhotoItems(items); }).catch(() => {});
     return () => { current = false; };
   }, [repository, businessId, showPhotos]);
   const [sessionRevision, setSessionRevision] = useState(0);

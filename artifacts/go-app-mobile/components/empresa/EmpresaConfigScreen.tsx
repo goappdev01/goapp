@@ -88,6 +88,7 @@ import { parsePartialBookingPercent } from "@/data/bookingServices";
 import { ServiceAssociatedProducts, useServiceComplementCatalog } from "./ServiceComplementManager";
 import { CatalogPhotoButton } from "./CatalogPhotoButton";
 import { isSharedCatalogPhotoReference } from "@/data/demoCatalogPhotos";
+import { isCatalogStorageReference } from "@/data/booking";
 import { isStableBookingId, serializeServiceConfiguration, validateBookingResources,
   validateBusinessTimezone, validateServiceTiming, type BookingResource } from "@/data/serviceTiming";
 import { readServiceWorkWait, serviceWorkWaitTotal, updateServiceWorkWait, type ServiceWorkWaitDraft } from "@/data/serviceWorkWait";
@@ -2531,7 +2532,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
 
   type LocalSvc = SavedService & { id: string };
   const serializeServices = (svcs: LocalSvc[]) => svcs.filter(service => service.name.trim())
-    .map(({ name, description, duration, price, capacity, timing, photoUri }) => ({ name, duration, price, capacity, ...(description ? { description } : {}), ...(timing ? { timing } : {}), ...((demo || isSharedCatalogPhotoReference(photoUri) || photoUri === "none") && photoUri ? { photoUri } : {}) }));
+    .map(({ name, description, duration, price, capacity, timing, photoUri }) => ({ name, duration, price, capacity, ...(description ? { description } : {}), ...(timing ? { timing } : {}), ...((demo || isSharedCatalogPhotoReference(photoUri) || isCatalogStorageReference(photoUri) || photoUri === "none") && photoUri ? { photoUri } : {}) }));
   const saveServices = useCallback((services: SavedService[]) => {
     const configuredServices = services.filter(service => service.name.trim());
     const checked = serializeServiceConfiguration(configuredServices, { resources: config.bookingResources ?? [] });

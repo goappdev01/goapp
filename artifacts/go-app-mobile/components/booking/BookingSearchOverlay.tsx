@@ -23,8 +23,7 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { CatalogComplementSelector, CatalogQuoteBreakdown } from "./CatalogComplementSelector";
-import { CatalogItemPhoto, CatalogPhotoToggle, useCatalogPhotoPreference } from "./CatalogPhotoView";
-import { demoCatalogPhotoSource } from "@/data/demoCatalogPhotos";
+import { CatalogItemPhoto, CatalogPhotoToggle, hasCatalogPhoto, useCatalogPhotoPreference } from "./CatalogPhotoView";
 import { PartialPaymentSummary } from "./PartialPaymentSummary";
 import { catalogBookingServices, isCatalogService, type CatalogQuote } from "@/data/catalogAssociations";
 import { getBookingDiscountPrices, quoteBookingDiscount, type BookingDiscountPrices } from "@/data/bookingDiscounts";
@@ -356,7 +355,7 @@ export function BookingSearchOverlay({
     ? demoRepository.cancelBooking(id).catch(() => undefined)
     : cancelBooking(id);
   const { t, lang } = useLanguage();
-  const { showPhotos, choose: choosePhotoView } = useCatalogPhotoPreference();
+  const { showPhotos, choose: choosePhotoView, ready: photoPreferenceReady } = useCatalogPhotoPreference(!!demoRepository);
   const insets = useSafeAreaInsets();
   const handedness = useContext(GoNavigationHand);
   const { fontScale, width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -1493,7 +1492,7 @@ export function BookingSearchOverlay({
               <View style={s.stepWrap}>
                 {changeSelection && !!slotError && <Text accessibilityRole="alert" style={s.emptyText}>{slotError}</Text>}
                 {!compactServices && <BreadcrumbStrip business={selectedBusiness} item={null} accentColor={accentColor} />}
-                <CatalogPhotoToggle showPhotos={showPhotos} choose={choosePhotoView} />
+                <CatalogPhotoToggle showPhotos={showPhotos} choose={choosePhotoView} ready={photoPreferenceReady} />
                 {items.length === 0 ? (
                   <View style={s.emptyWrap}>
                     <Feather name="package" size={32} color="rgba(255,255,255,0.08)" />
@@ -1508,11 +1507,11 @@ export function BookingSearchOverlay({
                         testID={"booking-service-" + item.id}
                         accessibilityRole="checkbox"
                         accessibilityState={{ checked: selectedServiceIds.includes(item.id) }}
-                        style={[s.serviceCard, compactServices && s.compactServiceCard, { borderColor: selectedServiceIds.includes(item.id) ? accentColor : `${accentColor}90`, borderWidth:selectedServiceIds.includes(item.id)?2:1, backgroundColor:selectedServiceIds.includes(item.id)?`${accentColor}18`:"rgba(255,255,255,0.04)", paddingLeft: showPhotos && demoCatalogPhotoSource(item) ? 72 : undefined, minHeight: showPhotos && demoCatalogPhotoSource(item) ? 72 : undefined }]}
+                        style={[s.serviceCard, compactServices && s.compactServiceCard, { borderColor: selectedServiceIds.includes(item.id) ? accentColor : `${accentColor}90`, borderWidth:selectedServiceIds.includes(item.id)?2:1, backgroundColor:selectedServiceIds.includes(item.id)?`${accentColor}18`:"rgba(255,255,255,0.04)", paddingLeft: showPhotos && hasCatalogPhoto(item) ? 128 : undefined, minHeight: showPhotos && hasCatalogPhoto(item) ? 124 : undefined }]}
                         onPress={() => handleSelectItem(item)}
                         activeOpacity={0.72}
                       >
-                        <CatalogItemPhoto item={item} enabled={showPhotos} absolute />
+                        <CatalogItemPhoto item={item} enabled={showPhotos} absolute size={108} />
                         {compactServices ? <>
                         <View style={s.compactServiceRow}>
                           <Text style={[s.serviceTitle, s.compactServiceName]}>{trSector(item.title, lang)}</Text>
@@ -1533,12 +1532,11 @@ export function BookingSearchOverlay({
                                 <Feather name="users" size={11} color="rgba(255,255,255,0.40)" />
                                 <Text style={s.metaBadgeText}>{item.customerCapacity} pers.</Text>
                               </View>}
-                              {!!item.type && <View style={s.metaBadge}><Text style={s.metaBadgeText}>{trSector(item.type, lang)}</Text></View>}
                             </View>
                             {!!item.description && <Text style={s.metaBadgeText}>{item.description}</Text>}
                           </View>
                           <View style={s.serviceSelectionMark} pointerEvents="none">
-                            <Feather name={selectedServiceIds.includes(item.id) ? "check-square" : "chevron-right"} size={18} color={accentColor} />
+                            <Feather name={selectedServiceIds.includes(item.id) ? "check-square" : "square"} size={18} color={selectedServiceIds.includes(item.id) ? "#168753" : "#E6C44A"} />
                           </View>
                         </View>
                         </> : <>
@@ -1556,11 +1554,6 @@ export function BookingSearchOverlay({
                                 <Text style={s.metaBadgeText}>{item.customerCapacity} pers.</Text>
                               </View>
                             )}
-                            {item.type ? (
-                              <View style={s.metaBadge}>
-                                <Text style={s.metaBadgeText}>{trSector(item.type, lang)}</Text>
-                              </View>
-                            ) : null}
                           </View>
                         </View>
                         <View style={{ alignItems: "flex-end", gap: 6 }}>

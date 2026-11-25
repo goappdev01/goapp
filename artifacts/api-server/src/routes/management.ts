@@ -221,6 +221,29 @@ router.patch("/businesses/:businessId", async (req, res) => {
   const query = new URLSearchParams({ id: `eq.${req.params.businessId}`, owner_id: `eq.${res.locals.userId}` });
   await relay(res, await request(req, `businesses?${query}`, "PATCH", data), true);
 });
+router.post("/businesses/:businessId/catalog-photos", async (req, res) => {
+  if (!await ownsBusiness(req, res)) return;
+  const { mime_type, content_base64 } = req.body ?? {};
+  if (!["image/jpeg", "image/png"].includes(mime_type) || typeof content_base64 !== "string"
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content_base64)) {
+    res.status(400).json({ code: "INVALID_CATALOG_PHOTO" }); return;
+  }
+  const content = Buffer.from(content_base64, "base64");
+  const valid = mime_type === "image/jpeg" ? content[0] === 255 && content[1] === 216 && content.at(-2) === 255 && content.at(-1) === 217
+    : content.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+  if (!valid || content.length < 100 || content.length > 1048576) {
+    res.status(400).json({ code: "INVALID_CATALOG_PHOTO" }); return;
+  }
+  const path = `${req.params.businessId}/${randomUUID()}.${mime_type === "image/jpeg" ? "jpg" : "png"}`;
+  try {
+    const upload = await supabaseStorageRequest(`/storage/v1/object/go-catalog-photos/${path}`, req.header("authorization"), {
+      method: "POST", contentType: mime_type,
+      body: new Uint8Array(content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength)),
+    });
+    if (!upload.ok) { res.status(upload.status === 403 ? 403 : 503).json({ code: "CATALOG_PHOTO_UPLOAD_FAILED" }); return; }
+    res.status(201).json({ photoUri: `go-storage:${path}` });
+  } catch { res.status(503).json({ code: "CATALOG_PHOTO_UPLOAD_FAILED" }); }
+});
 for (const resource of ["services", "staff", "availability"]) {
   const path = `/businesses/:businessId/${resource}`;
   router.get(path, async (req, res) => {
@@ -233,6 +256,13 @@ for (const resource of ["services", "staff", "availability"]) {
       const data = validate(resource, req.body, creating);
       if (!data || (!creating && !uuid.test(String(req.params.id)))) { res.status(400).json({ error: "Configuración inválida." }); return; }
       if (!await ownsBusiness(req, res)) return;
+      if (resource === "services") {
+        const photo = (data.ui_metadata as Record<string, unknown> | undefined)?.photoUri;
+        if (typeof photo === "string" && photo.startsWith("go-storage:")
+          && !new RegExp(`^go-storage:${req.params.businessId}/[0-9a-f-]{36}\\.(?:jpg|png)$`, "i").test(photo)) {
+          res.status(400).json({ code: "INVALID_CATALOG_PHOTO" }); return;
+        }
+      }
       if (resource === "availability" && data.staff_id) {
         const query = new URLSearchParams({ id: `eq.${data.staff_id}`, business_id: `eq.${req.params.businessId}`, select: "id" });
         const response = await request(req, `staff?${query}`);

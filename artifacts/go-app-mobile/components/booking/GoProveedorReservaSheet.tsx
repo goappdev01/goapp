@@ -47,10 +47,10 @@ import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { PEOPLE_SECTORS, SUB_TO_SECTOR } from "@/data/goSectorData";
 import { getBusinessIcon } from "@/lib/businessIcons";
-import { bookingActivityEnabled } from "@workspace/api-zod";
+import { bookingActivityEnabled, canonicalBookingActivity } from "@workspace/api-zod";
 import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
 import { BookingSearchOverlay } from "./BookingSearchOverlay";
-import { CatalogItemPhoto, CatalogPhotoToggle, useCatalogPhotoPreference } from "./CatalogPhotoView";
+import { CatalogItemPhoto, CatalogPhotoToggle, hasCatalogPhoto, useCatalogPhotoPreference } from "./CatalogPhotoView";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type ProveedorData = {
@@ -187,7 +187,7 @@ function LocalProveedorReservaSheet({
   const insets = useSafeAreaInsets();
   const { config } = useBusinessConfig();
   const { t } = useLanguage();
-  const { showPhotos, choose: choosePhotoView } = useCatalogPhotoPreference();
+  const { showPhotos, choose: choosePhotoView, ready: photoPreferenceReady } = useCatalogPhotoPreference();
 
   // ── Refs para auto-scroll entre pasos ─────────────────────────────────────
   const scrollRef  = useRef<ScrollViewInstance>(null);
@@ -1628,7 +1628,7 @@ function LocalProveedorReservaSheet({
             <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", fontWeight: "800", color: "rgba(255,255,255,0.38)", letterSpacing: 1.4, marginBottom: 12 }}>
               1 · SERVICIO
             </Text>
-            <CatalogPhotoToggle showPhotos={showPhotos} choose={choosePhotoView} />
+            <CatalogPhotoToggle showPhotos={showPhotos} choose={choosePhotoView} ready={photoPreferenceReady} />
             {allServices.length === 0 ? (
               <View style={{ backgroundColor: "#0E0E0E", borderRadius: 18, padding: 20, alignItems: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)" }}>
                 <Text style={{ fontSize: 13, color: "rgba(255,255,255,0.38)", textAlign: "center" }}>
@@ -1655,6 +1655,7 @@ function LocalProveedorReservaSheet({
                         flexDirection: "row", alignItems: "center",
                         backgroundColor: active ? "#141414" : "#0E0E0E",
                         borderRadius: 18, padding: 14,
+                        minHeight: showPhotos && realItems[i] && hasCatalogPhoto(realItems[i]) ? 128 : undefined,
                         borderWidth: 1.5,
                         borderColor: active ? color : "rgba(255,255,255,0.09)",
                         shadowColor: active ? color : "#000",
@@ -1666,9 +1667,9 @@ function LocalProveedorReservaSheet({
                       {active && (
                         <View style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, backgroundColor: color, borderTopLeftRadius: 18, borderBottomLeftRadius: 18 }} />
                       )}
-                      {realItems[i] && <CatalogItemPhoto item={realItems[i]} enabled={showPhotos} />}
+                      {realItems[i] && <CatalogItemPhoto item={realItems[i]} enabled={showPhotos} size={108} />}
                       <View style={{ flex: 1, gap: 3, paddingLeft: active ? 8 : 0 }}>
-                        <Text style={{ fontSize: 13, fontFamily: "Inter_700Bold", fontWeight: "800", color: "#FFFFFF" }}>{svc.title}</Text>
+                        <Text style={{ fontSize: showPhotos ? 16 : 13, fontFamily: "Inter_700Bold", fontWeight: "800", color: "#FFFFFF" }}>{svc.title}</Text>
                         <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.50)" }}>
                           {svc.durationMinutes < 60
                             ? `${svc.durationMinutes} min`
@@ -1677,15 +1678,16 @@ function LocalProveedorReservaSheet({
                         </Text>
                       </View>
                       {svc.price !== undefined && svc.price > 0 && (
-                        <Text style={{ fontSize: 16, fontWeight: "900", color: active ? color : "rgba(255,255,255,0.65)" }}>
+                        <Text style={{ fontSize: showPhotos ? 17 : 16, fontWeight: "900", color: active ? color : "#FFFFFF" }}>
                           {svc.price}€
                         </Text>
                       )}
-                      {active && (
-                        <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: color, alignItems: "center", justifyContent: "center", marginLeft: 10 }}>
-                          <Feather name="check" size={12} color="#fff" />
-                        </View>
-                      )}
+                      {canonicalBookingActivity(proveedor.subId) === "peluqueria" ?
+                        <Feather name={active ? "check-square" : "square"} size={23} color={active ? "#168753" : "#E6C44A"} style={{ marginLeft: 10 }} /> : active && (
+                          <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: color, alignItems: "center", justifyContent: "center", marginLeft: 10 }}>
+                            <Feather name="check" size={12} color="#fff" />
+                          </View>
+                        )}
                     </TouchableOpacity>
                   );
                 })}

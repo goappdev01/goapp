@@ -232,6 +232,80 @@ router.put("/alert-preferences", async (req: Request, res: Response) => {
   } catch { res.status(503).json({ code: "ALERT_PREFERENCES_NOT_SAVED" }); }
 });
 
+router.get("/catalog-photo-preference", async (req: Request, res: Response) => {
+  const identity = await alertPreferencesIdentity(req, res);
+  if (!identity) return;
+  try {
+    const query = new URLSearchParams({ select: "show_photos", user_id: `eq.${identity.userId}`, limit: "1" });
+    const result = await supabaseRequest(`/rest/v1/go_catalog_photo_preferences?${query}`, { headers: bearerHeader(identity.authorization) });
+    const rows = await result.json().catch(() => null);
+    if (!result.ok || !Array.isArray(rows)) { res.status(503).json({ code: "CATALOG_PREFERENCE_UNAVAILABLE" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ showPhotos: rows[0]?.show_photos === true });
+  } catch { res.status(503).json({ code: "CATALOG_PREFERENCE_UNAVAILABLE" }); }
+});
+
+router.put("/catalog-photo-preference", async (req: Request, res: Response) => {
+  const identity = await alertPreferencesIdentity(req, res);
+  if (!identity) return;
+  if (typeof req.body?.showPhotos !== "boolean" || Object.keys(req.body).length !== 1) {
+    res.status(400).json({ code: "INVALID_CATALOG_PREFERENCE" }); return;
+  }
+  try {
+    const result = await supabaseRequest("/rest/v1/go_catalog_photo_preferences?on_conflict=user_id", {
+      method: "POST", headers: { ...bearerHeader(identity.authorization), "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify({ user_id: identity.userId, show_photos: req.body.showPhotos, updated_at: new Date().toISOString() }),
+    });
+    const rows = await result.json().catch(() => null);
+    if (!result.ok || !Array.isArray(rows) || rows.length !== 1 || rows[0].show_photos !== req.body.showPhotos) {
+      res.status(503).json({ code: "CATALOG_PREFERENCE_NOT_SAVED" }); return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ showPhotos: rows[0].show_photos });
+  } catch { res.status(503).json({ code: "CATALOG_PREFERENCE_NOT_SAVED" }); }
+});
+
+// The private bucket never exposes an unsigned URL. RLS validates the same
+// caller JWT when Supabase creates a short-lived URL for a published service.
+router.get("/catalog-photo-url", async (req: Request, res: Response) => {
+  const identity = await alertPreferencesIdentity(req, res);
+  if (!identity) return;
+  const reference = req.query.ref;
+  const match = typeof reference === "string" && /^go-storage:([0-9a-f-]{36})\/([0-9a-f-]{36}\.(?:jpg|png))$/i.exec(reference);
+  if (!match) { res.status(400).json({ code: "INVALID_CATALOG_PHOTO" }); return; }
+  const businessId = match[1], objectPath = `${businessId}/${match[2]}`;
+  try {
+    const servicesQuery = new URLSearchParams({ select: "id,business_id,active,ui_metadata", business_id: `eq.${businessId}`, "ui_metadata->>photoUri": `eq.${reference}`, limit: "1" });
+    const businessQuery = new URLSearchParams({ select: "id,owner_id,verified,booking_enabled", id: `eq.${businessId}`, limit: "1" });
+    const [servicesResult, businessResult] = await Promise.all([
+      supabaseRequest(`/rest/v1/services?${servicesQuery}`, { headers: bearerHeader(identity.authorization) }),
+      supabaseRequest(`/rest/v1/businesses?${businessQuery}`, { headers: bearerHeader(identity.authorization) }),
+    ]);
+    const services = await servicesResult.json().catch(() => null), businesses = await businessResult.json().catch(() => null);
+    if (!servicesResult.ok || !businessResult.ok || !Array.isArray(services) || !Array.isArray(businesses)) {
+      res.status(503).json({ code: "CATALOG_PHOTO_UNAVAILABLE" }); return;
+    }
+    const business = businesses[0];
+    const owns = business?.owner_id === identity.userId && business?.verified === true;
+    const published = business?.verified === true && business?.booking_enabled === true;
+    if (!services.some(row => row.ui_metadata?.photoUri === reference && (owns || published && row.active === true))) {
+      res.status(404).json({ code: "CATALOG_PHOTO_NOT_FOUND" }); return;
+    }
+    const signed = await supabaseRequest(`/storage/v1/object/sign/go-catalog-photos/${objectPath}`, {
+      method: "POST", headers: { ...bearerHeader(identity.authorization), "Content-Type": "application/json" },
+      body: JSON.stringify({ expiresIn: 600 }),
+    });
+    const payload = await signed.json().catch(() => null) as { signedURL?: unknown } | null;
+    if (!signed.ok || typeof payload?.signedURL !== "string" || !payload.signedURL.startsWith("/object/sign/go-catalog-photos/")) {
+      res.status(503).json({ code: "CATALOG_PHOTO_UNAVAILABLE" }); return;
+    }
+    const origin = process.env.SUPABASE_URL;
+    if (!origin) { res.status(503).json({ code: "CATALOG_PHOTO_UNAVAILABLE" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ url: `${origin.replace(/\/$/, "")}/storage/v1${payload.signedURL}` });
+  } catch { res.status(503).json({ code: "CATALOG_PHOTO_UNAVAILABLE" }); }
+});
+
 router.get("/businesses", async (req: Request, res: Response) => {
   const internal = await internalModuleAccess(req, res);
   if (internal === null) return;

@@ -18,10 +18,10 @@ function bookingPhotoFunctions(){
   const names=["serviceBody","mapRemoteService"],declarations=names.map(name=>ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name));
   assert.ok(declarations.every(Boolean));
   const code=ts.transpileModule(declarations.map(node=>node.getText(ast)).join("\n")+"\n"+names.map(name=>`exports.${name}=${name};`).join("\n"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  const exports={};vm.runInNewContext(code,{exports,isCatalogReferenceSyntax:value=>typeof value==="string"&&/^demo-catalog:[a-z0-9-]{1,64}$/.test(value),BookingApiError:Error});return exports;
+  const exports={};vm.runInNewContext(code,{exports,isCatalogReferenceSyntax:value=>typeof value==="string"&&/^demo-catalog:[a-z0-9-]{1,64}$/.test(value),isCatalogStorageReference:value=>typeof value==="string"&&/^go-storage:[0-9a-f-]{36}\/[0-9a-f-]{36}\.(?:jpg|png)$/i.test(value),BookingApiError:Error});return exports;
 }
 
-test("real catalogue stores only shared references in existing service metadata and reads them back",()=>{
+test("real catalogue stores shared and business-owned Storage references in existing service metadata",()=>{
   const {serviceBody,mapRemoteService}=bookingPhotoFunctions(),reference=photos.demoCatalogExampleReference("salon-rulos");
   const item={businessId:"business-1",title:"Peinado",type:"peluqueria",catalogKind:"service",durationMinutes:30,price:20,active:true,visible:true,photoUri:reference};
   const body=serviceBody(item);assert.equal(body.ui_metadata.photoUri,reference);
@@ -29,7 +29,11 @@ test("real catalogue stores only shared references in existing service metadata 
   assert.equal(restored.photoUri,reference);
   assert.match(photos.catalogPhotoSource(restored),/salon-rulos/);
   assert.equal(serviceBody({...item,photoUri:"none"}).ui_metadata.photoUri,"none");
-  assert.throws(()=>serviceBody({...item,photoUri:"data:image/jpeg;base64,/9j/PRIVATE"}),/imagen de ejemplo válida/);
+  assert.throws(()=>serviceBody({...item,photoUri:"data:image/jpeg;base64,/9j/PRIVATE"}),/no pertenece a esta empresa/);
+  const businessId="11111111-1111-4111-8111-111111111111",photoUri=`go-storage:${businessId}/22222222-2222-4222-8222-222222222222.jpg`;
+  assert.equal(serviceBody({...item,businessId,photoUri}).ui_metadata.photoUri,photoUri);
+  assert.equal(mapRemoteService({...restored,business_id:businessId,name:item.title,duration_minutes:30,price:20,ui_metadata:{photoUri}}).photoUri,photoUri);
+  assert.throws(()=>serviceBody({...item,businessId,photoUri:photoUri.replace(businessId,"33333333-3333-4333-8333-333333333333")}),/no pertenece a esta empresa/);
   assert.equal(mapRemoteService({...restored,business_id:item.businessId,name:item.title,duration_minutes:30,price:20,ui_metadata:{photoUri:"https://other.example/private.jpg"}}).photoUri,undefined);
 });
 
@@ -74,7 +78,7 @@ test("DEMO photo control offers filtered local examples without requesting perso
   const nodes=tree=>!tree||typeof tree!=="object"?[]:[tree,...(tree.props?.children??[]).flatMap(nodes)];
   let asset={base64:"/9j/PHOTO",mimeType:"image/jpeg"};
   const picker={requestCameraPermissionsAsync:async()=>{calls.push("camera permission");return{granted:true};},requestMediaLibraryPermissionsAsync:async()=>{calls.push("gallery permission");return{granted:true};},launchCameraAsync:async()=>{calls.push("camera");return{canceled:false,assets:[asset]};},launchImageLibraryAsync:async()=>{calls.push("gallery");return{canceled:false,assets:[asset]};}};
-  const {CatalogPhotoButton,CatalogExampleGallery}=load("components/empresa/CatalogPhotoButton.tsx",{react:React,"react-native":{Alert:{alert:(...args)=>alerts.push(args)},TouchableOpacity:"button",View:"view",Text:"text",TextInput:"input",FlatList:"flat-list",Modal:"modal",ScrollView:"scroll"},"@expo/vector-icons":{Feather:"icon"},"expo-image":{Image:"image"},"expo-image-picker":picker,"@/data/demoCatalogPhotos":photos});
+  const {CatalogPhotoButton,CatalogExampleGallery}=load("components/empresa/CatalogPhotoButton.tsx",{react:React,"react-native":{Alert:{alert:(...args)=>alerts.push(args)},TouchableOpacity:"button",View:"view",Text:"text",TextInput:"input",FlatList:"flat-list",Modal:"modal",ScrollView:"scroll"},"@expo/vector-icons":{Feather:"icon"},"expo-image":{Image:"image"},"expo-image-picker":picker,"@/data/demoCatalogPhotos":photos,"@/data/booking":{uploadCatalogPhoto:async()=>"go-storage:11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.jpg"},"@/components/booking/CatalogPhotoView":{useCatalogPhotoSource:item=>photos.catalogPhotoSource(item)}});
   const props={id:"service",businessId:"demo_business_owner",title:"Corte",type:"peluqueria",demo:true,onChange:value=>changes.push(value)};
   const button=tree=>nodes(tree).find(node=>node.props.testID==="catalog-photo-service");
   button(CatalogPhotoButton(props)).props.onPress();
@@ -102,11 +106,11 @@ test("DEMO photo control offers filtered local examples without requesting perso
   alerts.at(-1)[2][3].onPress();await new Promise(setImmediate);assert.equal(changes.at(-1),"none");
   asset={base64:"/9j/PHOTO",mimeType:"image/png"};button(CatalogPhotoButton(props)).props.onPress();alerts.at(-1)[2][1].onPress();await new Promise(setImmediate);assert.match(alerts.at(-1)[1],/JPEG o PNG/);
   button(CatalogPhotoButton({...props,businessId:"real-company",demo:false})).props.onPress();
-  assert.deepEqual(Array.from(alerts.at(-1)[2],option=>option.text),["Imágenes de ejemplo","Cancelar"]);
+  assert.deepEqual(Array.from(alerts.at(-1)[2],option=>option.text),["Imágenes de ejemplo","Galería","Cámara","Cancelar"]);
   assert.deepEqual(calls,["gallery permission","gallery","camera permission","camera","gallery permission","gallery"]);
   button(CatalogPhotoButton({...props,businessId:"real-company",demo:false,photoUri:"demo-catalog:gazpacho"})).props.onPress();
-  assert.deepEqual(Array.from(alerts.at(-1)[2],option=>option.text),["Imágenes de ejemplo","Eliminar","Cancelar"]);
-  alerts.at(-1)[2][1].onPress();await new Promise(setImmediate);assert.equal(changes.at(-1),"none");
+  assert.deepEqual(Array.from(alerts.at(-1)[2],option=>option.text),["Imágenes de ejemplo","Galería","Cámara","Eliminar","Cancelar"]);
+  alerts.at(-1)[2][3].onPress();await new Promise(setImmediate);assert.equal(changes.at(-1),"none");
 });
 
 test("example search and category filters keep restaurant and hair photos separate",()=>{
@@ -118,21 +122,45 @@ test("example search and category filters keep restaurant and hair photos separa
   assert.equal(photos.filterDemoCatalogPhotoExamples("Restaurantes","Todas","salon").length,0);
 });
 
-test("client photo toggle keeps its device preference and leaves cards without images compact",async()=>{
-  const memory=new Map(),React={createElement:(type,props,...children)=>({type,props:{...props,children}})};
-  let value=false;
-  React.useState=()=>[value,next=>{value=next;}];React.useEffect=effect=>effect();
-  const module=load("components/booking/CatalogPhotoView.tsx",{react:React,"react-native":{Text:"text",TouchableOpacity:"button",View:"view"},"@react-native-async-storage/async-storage":{__esModule:true,default:{getItem:async key=>memory.get(key)??null,setItem:async(key,next)=>{memory.set(key,next);}}},"expo-image":{Image:"image"},"@/data/demoCatalogPhotos":{demoCatalogPhotoSource:photos.demoCatalogPhotoSource}});
-  const pref=module.useCatalogPhotoPreference();assert.equal(pref.showPhotos,false);
-  pref.choose(true);await new Promise(setImmediate);assert.equal(memory.get("go_customer_catalog_photos_v1"),"yes");
-  const buttons=module.CatalogPhotoToggle({showPhotos:true,choose:pref.choose}).props.children.flat();
-  assert.equal(buttons.length,2);assert.equal(buttons[0].props.accessibilityState.selected,true);
-  buttons[1].props.onPress();await new Promise(setImmediate);assert.equal(memory.get("go_customer_catalog_photos_v1"),"no");
+test("DEMO stores its view locally while real accounts persist it through the API",async()=>{
+  const memory=new Map(),remote=[],effects=[];let states=[],cursor=0;
+  const React={Fragment:"fragment",createElement:(type,props,...children)=>({type,props:{...props,children}}),
+    useState(initial){const index=cursor++;if(!(index in states))states[index]=initial;return[states[index],value=>{states[index]=value}]},
+    useEffect:effect=>{effects.push(effect)}};
+  const module=load("components/booking/CatalogPhotoView.tsx",{react:React,"react-native":{Alert:{alert(){}},Modal:"modal",Text:"text",TouchableOpacity:"button",View:"view"},
+    "@react-native-async-storage/async-storage":{__esModule:true,default:{getItem:async key=>memory.get(key)??null,setItem:async(key,next)=>{memory.set(key,next);}}},
+    "expo-image":{Image:"image"},"@/data/demoCatalogPhotos":{catalogPhotoSource:photos.catalogPhotoSource},"@/lib/sessionEvents":{onSessionChanged:()=>()=>{}},
+    "@/data/booking":{getAuthenticatedUserId:async()=>"user-1",getCatalogPhotoPreference:async id=>{remote.push(["read",id]);return true;},
+      saveCatalogPhotoPreference:async(value,id)=>{remote.push(["write",id,value]);},getCatalogPhotoUrl:async()=>"https://example.test/signed",
+      isCatalogStorageReference:value=>typeof value==="string"&&value.startsWith("go-storage:")}});
+  const render=demo=>{cursor=0;return module.useCatalogPhotoPreference(demo)};
+  render(true);for(const effect of effects.splice(0))effect();await new Promise(setImmediate);
+  let pref=render(true);assert.equal(pref.ready,true);pref.choose(true);await new Promise(setImmediate);
+  assert.equal(memory.get("go_customer_catalog_photos_v1"),"yes");assert.deepEqual(remote,[]);
+  states=[];render(false);for(const effect of effects.splice(0))effect();await new Promise(setImmediate);
+  pref=render(false);assert.equal(pref.ready,true);assert.equal(pref.showPhotos,true);pref.choose(false);await new Promise(setImmediate);
+  assert.deepEqual(remote,[["read","user-1"],["write","user-1",false]]);
   const item={id:"missing",businessId:"demo_business_owner",title:"Sin foto",type:"restaurante"};
-  assert.equal(module.CatalogItemPhoto({item,enabled:true}),null);
-  assert.equal(module.CatalogItemPhoto({...{item,enabled:false}}),null);
-  assert.equal(module.CatalogItemPhoto({item:{...item,title:"Croquetas"},enabled:true}).type,"image");
-  assert.match(module.CatalogItemPhoto({item:{...item,photoUri:"demo-catalog:churros-chocolate"},enabled:true}).props.source,/churros-chocolate/);
-  assert.match(module.CatalogItemPhoto({item:{...item,businessId:"real-company",photoUri:"demo-catalog:churros-chocolate"},enabled:true}).props.source,/churros-chocolate/);
-  assert.equal(module.CatalogItemPhoto({item:{...item,photoUri:"demo-catalog:churros-chocolate"},enabled:false}),null);
+  assert.equal(module.hasCatalogPhoto(item),false);
+  assert.equal(module.hasCatalogPhoto({...item,photoUri:"demo-catalog:churros-chocolate"}),true);
+  assert.equal(module.hasCatalogPhoto({...item,photoUri:"go-storage:11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.jpg"}),true);
+  const buttons=module.CatalogPhotoToggle({showPhotos:true,choose:pref.choose}).props.children.flat();
+  assert.equal(buttons[0].props.accessibilityState.selected,true);
+});
+
+test("tapping a catalogue photograph enlarges it without selecting its parent service",()=>{
+  let states=[],cursor=0,stopped=0;
+  const React={Fragment:"fragment",createElement:(type,props,...children)=>({type,props:{...props,children}}),
+    useState(initial){const index=cursor++;if(!(index in states))states[index]=initial;return[states[index],value=>{states[index]=value}]},useEffect:()=>{}};
+  const component=load("components/booking/CatalogPhotoView.tsx",{react:React,"react-native":{Alert:{alert(){}},Modal:"modal",Text:"text",TouchableOpacity:"button",View:"view"},
+    "@react-native-async-storage/async-storage":{__esModule:true,default:{}},"expo-image":{Image:"image"},
+    "@/data/demoCatalogPhotos":{catalogPhotoSource:photos.catalogPhotoSource},"@/lib/sessionEvents":{onSessionChanged:()=>()=>{}},"@/data/booking":{isCatalogStorageReference:()=>false}});
+  const item={id:"service",businessId:"11111111-1111-4111-8111-111111111111",title:"Tinte",type:"peluqueria",photoUri:"demo-catalog:salon-rulos"};
+  const render=()=>{cursor=0;return component.CatalogItemPhoto({item,enabled:true,size:108})};
+  const nodes=tree=>!tree||typeof tree!=="object"?[]:[tree,...(tree.props?.children??[]).flatMap(nodes)];
+  let tree=render(),photo=nodes(tree).find(node=>node.props?.testID==="catalog-photo-service");
+  assert.equal(photo.props.style[0].width,108);photo.props.onPress({stopPropagation:()=>stopped++});assert.equal(stopped,1);
+  tree=render();assert.equal(nodes(tree).find(node=>node.type==="modal").props.visible,true);
+  nodes(tree).find(node=>node.props?.testID==="catalog-photo-close").props.onPress();
+  assert.equal(nodes(render()).find(node=>node.type==="modal").props.visible,false);
 });

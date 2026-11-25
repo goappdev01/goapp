@@ -3,7 +3,9 @@ import { Alert, FlatList, Modal, ScrollView, Text, TextInput, TouchableOpacity, 
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { demoCatalogExampleReference, demoCatalogExampleSource, demoCatalogPhotoCategories, catalogPhotoSource, filterDemoCatalogPhotoExamples, type DemoCatalogPhotoGroup } from "@/data/demoCatalogPhotos";
+import { demoCatalogExampleReference, demoCatalogExampleSource, demoCatalogPhotoCategories, filterDemoCatalogPhotoExamples, type DemoCatalogPhotoGroup } from "@/data/demoCatalogPhotos";
+import { uploadCatalogPhoto } from "@/data/booking";
+import { useCatalogPhotoSource } from "@/components/booking/CatalogPhotoView";
 
 type Props = { id: string; businessId: string; title: string; type: string; photoUri?: string; demo: boolean; onChange: (value: string) => void | Promise<unknown> };
 
@@ -53,10 +55,12 @@ export function CatalogExampleGallery({ visible, onSelect, onClose, initialGroup
   </Modal>;
 }
 
-/** Example references work for every company. Private files remain DEMO-only until secure storage exists. */
+/** Example references and private company files use the same catalogue field. */
 export function CatalogPhotoButton({ id, businessId, title, type, photoUri, demo, onChange }: Props) {
   const [examplesOpen, setExamplesOpen] = useState(false);
-  const source = catalogPhotoSource({ id, businessId, title, type, photoUri });
+  const [preview, setPreview] = useState<{ ref: string; uri: string } | null>(null);
+  const savedSource = useCatalogPhotoSource({ id, businessId, title, type, photoUri });
+  const source = preview && preview.ref === photoUri ? { uri: preview.uri } : savedSource;
   const applyPhoto = async (value: string) => {
     try { await onChange(value); }
     catch (error) { Alert.alert("Fotografía", error instanceof Error ? error.message : "No se pudo guardar la fotografía."); }
@@ -70,18 +74,19 @@ export function CatalogPhotoButton({ id, businessId, title, type, photoUri, demo
       if (result.canceled) return;
       const asset = result.assets?.[0], encoded = asset?.base64;
       const jpeg = !!encoded?.startsWith("/9j/"), png = !!encoded?.startsWith("iVBOR");
-      if (!encoded || !((jpeg && asset?.mimeType === "image/jpeg") || (png && asset?.mimeType === "image/png")) || encoded.length > 360_000)
-        throw new Error("Elige una imagen JPEG o PNG de menos de 270 KB tras la compresión.");
-      await applyPhoto(`data:${jpeg ? "image/jpeg" : "image/png"};base64,${encoded}`);
-    } catch (error) { Alert.alert("Fotografía", error instanceof Error ? error.message : "No se pudo guardar la fotografía DEMO."); }
+      if (!encoded || !((jpeg && asset?.mimeType === "image/jpeg") || (png && asset?.mimeType === "image/png")) || encoded.length > 1_400_000)
+        throw new Error("Elige una imagen JPEG o PNG de menos de 1 MB tras la compresión.");
+      const reference = demo ? `data:${jpeg ? "image/jpeg" : "image/png"};base64,${encoded}`
+        : await uploadCatalogPhoto(businessId, jpeg ? "image/jpeg" : "image/png", encoded);
+      if (!demo && asset?.uri) setPreview({ ref: reference, uri: asset.uri });
+      await applyPhoto(reference);
+    } catch (error) { Alert.alert("Fotografía", error instanceof Error ? error.message : "No se pudo guardar la fotografía."); }
   };
   return <View style={{ width: 48, height: 48 }}><TouchableOpacity testID={`catalog-photo-${id}`} accessibilityRole="button" accessibilityLabel={source ? "Cambiar fotografía" : "Añadir fotografía"}
-    onPress={() => Alert.alert("Fotografía", demo ? "Guardada solo en esta demostración" : "Las imágenes de ejemplo se guardan con este servicio. Las fotos propias necesitan almacenamiento empresarial seguro.", [
+    onPress={() => Alert.alert("Fotografía", demo ? "Guardada solo en esta demostración" : "La fotografía se guardará en tu catálogo empresarial.", [
       { text: "Imágenes de ejemplo", onPress: () => setExamplesOpen(true) },
-      ...(demo ? [
-        { text: "Galería", onPress: () => { void pick(false); } },
-        { text: "Cámara", onPress: () => { void pick(true); } },
-      ] : []),
+      { text: "Galería", onPress: () => { void pick(false); } },
+      { text: "Cámara", onPress: () => { void pick(true); } },
       ...(source ? [{ text: "Eliminar", style: "destructive" as const, onPress: () => { void applyPhoto("none"); } }] : []),
       { text: "Cancelar", style: "cancel" as const },
     ])}
