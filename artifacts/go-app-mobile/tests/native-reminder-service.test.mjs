@@ -15,7 +15,9 @@ const response = (scope = A, taskId = "buy") => ({ notification: { date: 101,
 function fixture({ ready = true, scope = A, last = null, platform = "ios" } = {}) {
   const refs = [], effects = [], commits = [], subscriptions = { store: new Set(), session: new Set(), app: new Set(), tap: new Set() };
   const calls = { setup: [], refresh: [], suspend: 0, open: [], clear: 0, removed: [], warnings: [], nativeCancel: 0 };
-  const state = { identity: { ready, scope }, alertMode: "sound", active: null, last, openGate: null };
+  const state = { identity: { ready, scope }, alertMode: "sound", active: null, last, openGate: null,
+    settings: { mode: "sound", categories: { task: true }, priority: "standard", intervalMinutes: 15, repeats: 2,
+      quietHours: { enabled: false, start: "22:00", end: "08:00" } } };
   let refIndex = 0, effectIndex = 0;
   const subscribe = (kind, listener) => { subscriptions[kind].add(listener); return () => {
     subscriptions[kind].delete(listener); calls.removed.push(kind);
@@ -49,7 +51,8 @@ function fixture({ ready = true, scope = A, last = null, platform = "ios" } = {}
   };
   const modules = { react, "react-native": { Platform: { OS: platform },
       AppState: { addEventListener(event, listener) { assert.equal(event, "change"); return { remove: subscribe("app", listener) }; } } },
-    "expo-notifications": notifications, "@/contexts/GoNotificationContext": { useGoNotification: () => ({ alertMode: state.alertMode }) },
+    "expo-notifications": notifications, "@/contexts/GoNotificationContext": { useGoNotification: () => ({ alertMode: state.alertMode,
+      settingsReady: true, deviceHaptics: true, settings: state.settings }) },
     "@/hooks/useAssistantZoneScope": { useAssistantZoneScope: () => state.identity },
     "@/lib/goLogStore": { subscribeGoLog: listener => subscribe("store", listener) },
     "@/lib/sessionEvents": { onSessionChanged: listener => subscribe("session", listener) },
@@ -61,7 +64,9 @@ function fixture({ ready = true, scope = A, last = null, platform = "ios" } = {}
     compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React },
   }).outputText, context);
   function render(identity = state.identity, mode = state.alertMode) {
-    state.identity = identity; state.alertMode = mode; refIndex = 0; effectIndex = 0;
+    state.identity = identity; state.alertMode = mode;
+    if (state.settings.mode !== mode) state.settings = { ...state.settings, mode };
+    refIndex = 0; effectIndex = 0;
     assert.equal(context.exports.GoTaskReminderInitializer(), null); while (commits.length) commits.shift()();
   }
   function emit(kind, value) { for (const listener of [...subscriptions[kind]]) listener(value); }

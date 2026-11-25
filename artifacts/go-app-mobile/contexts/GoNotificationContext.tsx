@@ -35,6 +35,9 @@ import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
+import { DEFAULT_GO_ALERT_SETTINGS, inQuietHours, loadGoAlertSettings, saveGoAlertSettings,
+  type GoAlertSettings } from "@/lib/goAlertPreferences";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -64,6 +67,13 @@ interface FireEventInput {
 interface GoNotificationContextValue {
   alertMode:      AlertMode;
   setAlertMode:   (m: AlertMode) => void;
+  settings:       GoAlertSettings;
+  settingsReady:  boolean;
+  settingsSaving: boolean;
+  settingsError:  string | null;
+  updateSettings: (value: GoAlertSettings) => Promise<boolean>;
+  deviceHaptics: boolean;
+  setDeviceHaptics: (value: boolean) => Promise<void>;
   // notify — actualiza contadores, no arranca recordatorios
   notify:         (event: FireEventInput) => void;
   // fireEvent — notifica INMEDIATAMENTE + programa recordatorios +15min/+60min
@@ -81,9 +91,7 @@ interface GoNotificationContextValue {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const ALERT_MODE_KEY     = "go_alert_mode_v1";
-const REMINDER_INTERVAL  = 3 * 60 * 1000;        // 3 min — avisos periódicos
-const REMINDER_15MIN     = 15 * 60 * 1000;
-const REMINDER_60MIN     = 60 * 60 * 1000;
+const DEVICE_HAPTICS_KEY = "go_alert_haptics_device_v1";
 
 // ── Sound ─────────────────────────────────────────────────────────────────────
 
@@ -112,8 +120,15 @@ function playGoAlertSound() {
 // ── Context ───────────────────────────────────────────────────────────────────
 
 const GoNotificationContext = createContext<GoNotificationContextValue>({
-  alertMode:     "sound",
+  alertMode:     "silent",
   setAlertMode:  () => {},
+  settings: { ...DEFAULT_GO_ALERT_SETTINGS, mode: "silent" },
+  settingsReady: false,
+  settingsSaving: false,
+  settingsError: null,
+  updateSettings: async () => false,
+  deviceHaptics: true,
+  setDeviceHaptics: async () => {},
   notify:        () => {},
   fireEvent:     () => {},
   pendingEvents: [],
@@ -127,8 +142,17 @@ const GoNotificationContext = createContext<GoNotificationContextValue>({
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function GoNotificationProvider({ children }: { children: React.ReactNode }) {
-  const [alertMode,     setAlertModeState] = useState<AlertMode>("sound");
+  const identity = useAssistantZoneScope();
+  const userId = identity.ready ? identity.scope?.userId : null;
+  const [settings, setSettings] = useState<GoAlertSettings>({ ...DEFAULT_GO_ALERT_SETTINGS, mode: "silent" });
+  const [settingsReady, setSettingsReady] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [deviceHaptics, setDeviceHapticsState] = useState(true);
+  const alertMode = settings.mode;
   const [pendingEvents, setPendingEvents]  = useState<GoAlertEvent[]>([]);
+  const activeUserRef = useRef<string | null>(userId);
+  activeUserRef.current = userId;
 
   const alertModeRef     = useRef<AlertMode>("sound");
   alertModeRef.current   = alertMode;
@@ -141,39 +165,85 @@ export function GoNotificationProvider({ children }: { children: React.ReactNode
   const reminderTimers  = useRef<Map<GoAlertEventKind, ReturnType<typeof setTimeout>[]>>(new Map());
 
   const soundCooldownRef = useRef(false);
-  const intervalRef      = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Carga el modo guardado al arrancar
   useEffect(() => {
-    AsyncStorage.getItem(ALERT_MODE_KEY).then(raw => {
-      if (raw === "sound" || raw === "visual" || raw === "silent") {
-        setAlertModeState(raw);
-      }
-    }).catch(() => {});
+    void AsyncStorage.getItem(DEVICE_HAPTICS_KEY).then(value => setDeviceHapticsState(value !== "off")).catch(() => {});
+  }, []);
+  const setDeviceHaptics = useCallback(async (value: boolean) => {
+    await AsyncStorage.setItem(DEVICE_HAPTICS_KEY, value ? "on" : "off");
+    setDeviceHapticsState(value);
   }, []);
 
-  const setAlertMode = useCallback((m: AlertMode) => {
-    setAlertModeState(m);
-    AsyncStorage.setItem(ALERT_MODE_KEY, m).catch(() => {});
-  }, []);
+  // Account settings are authoritative. The old device mode is imported only if
+  // this account has no row yet. A failed load never silently enables alerts.
+  useEffect(() => {
+    let active = true;
+    setSettingsReady(false);
+    setSettings({ ...DEFAULT_GO_ALERT_SETTINGS, mode: "silent" });
+    setSettingsError(null);
+    if (!userId) return () => { active = false; };
+    void (async () => {
+      try {
+        const legacyMode = await AsyncStorage.getItem(ALERT_MODE_KEY);
+        if (!active) return;
+        await AsyncStorage.setItem(ALERT_MODE_KEY, "silent");
+        let value = await loadGoAlertSettings(userId);
+        if (!active) return;
+        if (!value) {
+          const mode = legacyMode === "sound" || legacyMode === "visual" || legacyMode === "silent" ? legacyMode : "sound";
+          value = await saveGoAlertSettings(userId, { ...DEFAULT_GO_ALERT_SETTINGS, mode });
+        }
+        if (active) {
+          await AsyncStorage.setItem(ALERT_MODE_KEY, value.mode);
+          setSettings(value); setSettingsReady(true);
+        }
+      } catch {
+        if (active) setSettingsError("No se pudieron recuperar las alertas de tu cuenta. Los avisos quedan en silencio hasta conectar.");
+      }
+    })();
+    return () => { active = false; };
+  }, [userId]);
+
+  const savingRef = useRef(false);
+  const updateSettings = useCallback(async (value: GoAlertSettings): Promise<boolean> => {
+    if (!userId || !settingsReady || savingRef.current) return false;
+    savingRef.current = true;
+    setSettingsSaving(true);
+    setSettingsError(null);
+    try {
+      const saved = await saveGoAlertSettings(userId, value);
+      if (activeUserRef.current !== userId) return false;
+      await AsyncStorage.setItem(ALERT_MODE_KEY, saved.mode);
+      if (activeUserRef.current !== userId) return false;
+      setSettings(saved);
+      return true;
+    }
+    catch {
+      setSettingsError("No se pudieron guardar las alertas. Comprueba la conexión.");
+      return false;
+    } finally { savingRef.current = false; setSettingsSaving(false); }
+  }, [userId, settingsReady]);
+  const setAlertMode = useCallback((m: AlertMode) => { void updateSettings({ ...settings, mode: m }); }, [settings, updateSettings]);
 
   // Dispara el aviso sensorial (sonido + vibración) respetando el modo actual
   const triggerAlert = useCallback(() => {
     const mode = alertModeRef.current;
-    if (mode === "silent") return;
+    if (mode === "silent" || inQuietHours(settings, Date.now())) return;
     if (mode === "sound" && !soundCooldownRef.current) {
       soundCooldownRef.current = true;
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      if (deviceHaptics) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
       playGoAlertSound();
       setTimeout(() => { soundCooldownRef.current = false; }, 8_000);
     }
-  }, []);
+  }, [settings, deviceHaptics]);
 
   // notify — actualiza el estado del evento, dispara aviso si hay novedad
   const notify = useCallback((event: FireEventInput) => {
+    if (!settingsReady || !settings.categories[event.kind]) return;
     const count = event.count ?? 1;
     if (count <= 0) {
       setPendingEvents(prev => prev.filter(e => e.kind !== event.kind));
+      reminderTimers.current.get(event.kind)?.forEach(clearTimeout);
+      reminderTimers.current.delete(event.kind);
       return;
     }
     setPendingEvents(prev => {
@@ -193,13 +263,14 @@ export function GoNotificationProvider({ children }: { children: React.ReactNode
         { id: `${event.kind}-${Date.now()}`, kind: event.kind, title: event.title, count, createdAt: Date.now() },
       ];
     });
-  }, [triggerAlert]);
+  }, [triggerAlert, settingsReady, settings]);
 
   // fireEvent — notifica + arranca cadena de recordatorios (solo si no había uno previo)
   const fireEvent = useCallback((event: FireEventInput) => {
+    if (!settingsReady || !settings.categories[event.kind]) return;
     const count = event.count ?? 1;
     if (count <= 0) {
-      // Count cayó a 0 → resolver sin timers nuevos
+      notify({ ...event, count: 0 });
       return;
     }
 
@@ -208,8 +279,8 @@ export function GoNotificationProvider({ children }: { children: React.ReactNode
     // Siempre actualizar la burbuja (el count puede haber subido)
     notify(event);
 
-    if (!alreadyPending) {
-      // Primera ocurrencia → arrancar cadena 15min → 60min
+    if (!alreadyPending && !reminderTimers.current.has(event.kind)) {
+      // Only the configured finite follow-ups, never a permanent loop.
       const kind = event.kind;
       const scheduleReminder = (delay: number) => {
         return setTimeout(() => {
@@ -220,22 +291,22 @@ export function GoNotificationProvider({ children }: { children: React.ReactNode
         }, delay);
       };
 
-      const t15 = scheduleReminder(REMINDER_15MIN);
-      const t60 = scheduleReminder(REMINDER_60MIN);
-      reminderTimers.current.set(kind, [t15, t60]);
+      const delays = Array.from({ length: settings.repeats }, (_, index) =>
+        (index + 1) * settings.intervalMinutes * 60000).filter(delay => delay > 0);
+      reminderTimers.current.set(kind, delays.map(scheduleReminder));
     }
-  }, [notify, triggerAlert]);
+  }, [notify, triggerAlert, settings, settingsReady]);
 
   const resolveByKind = useCallback((kind: GoAlertEventKind) => {
     setPendingEvents(prev => prev.filter(e => e.kind !== kind));
+    const timers = reminderTimers.current.get(kind) ?? [];
+    timers.forEach(clearTimeout);
+    reminderTimers.current.delete(kind);
   }, []);
 
   // resolveEvent — limpia estado + cancela todos los recordatorios
   const resolveEvent = useCallback((kind: GoAlertEventKind) => {
     resolveByKind(kind);
-    const timers = reminderTimers.current.get(kind) ?? [];
-    timers.forEach(t => clearTimeout(t));
-    reminderTimers.current.delete(kind);
   }, [resolveByKind]);
 
   const resolveAll = useCallback(() => {
@@ -246,23 +317,24 @@ export function GoNotificationProvider({ children }: { children: React.ReactNode
 
   const totalPending = pendingEvents.reduce((acc, e) => acc + e.count, 0);
 
-  // Recordatorio periódico cada 3 min — solo para eventos que requieren acción real.
-  // Los pedidos ya están cubiertos por push + toast: pingear cada 3 min por un
-  // pedido "en preparación" viola la filosofía GO (no interrumpir sin valor real).
-  const pendingLen = pendingEvents.length;
+  // Changing preferences cancels old follow-ups; current events remain visible.
   useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = setInterval(() => {
-      const actionEvents = pendingEventsRef.current.filter(e => e.kind !== "pedido");
-      if (actionEvents.length > 0) triggerAlert();
-    }, REMINDER_INTERVAL);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [pendingLen, triggerAlert]);
+    reminderTimers.current.forEach(timers => timers.forEach(clearTimeout));
+    reminderTimers.current.clear();
+    setPendingEvents(prev => prev.filter(event => settings.categories[event.kind]));
+  }, [settings.mode, settings.intervalMinutes, settings.repeats, settings.categories, settings.quietHours]);
 
   return (
     <GoNotificationContext.Provider value={{
       alertMode,
       setAlertMode,
+      settings,
+      settingsReady,
+      settingsSaving,
+      settingsError,
+      updateSettings,
+      deviceHaptics,
+      setDeviceHaptics,
       notify,
       fireEvent,
       pendingEvents,
@@ -391,7 +463,7 @@ function ToggleRow({
 }
 
 export function GoAlertModePicker() {
-  const { alertMode, setAlertMode } = useGoNotification();
+  const { alertMode, setAlertMode, settingsSaving } = useGoNotification();
   const BLUE = "#4A80BD";
   const RED  = "#EF4444";
 
@@ -425,6 +497,7 @@ export function GoAlertModePicker() {
         label="Alertas visuales"
         sub="Muestra el globo de avisos"
         value={visualOn}
+        disabled={settingsSaving}
         color={BLUE}
         onToggle={toggleVisual}
       />
@@ -435,10 +508,10 @@ export function GoAlertModePicker() {
       <ToggleRow
         icon="bell"
         label="Sonidos"
-        sub={visualOn ? "Sonido + vibración en cada aviso" : "Activa alertas visuales primero"}
+        sub={visualOn ? "Sonido del sistema; háptica según dispositivo" : "Activa alertas visuales primero"}
         value={soundOn}
         color={BLUE}
-        disabled={!visualOn}
+        disabled={!visualOn || settingsSaving}
         onToggle={toggleSound}
       />
 
@@ -450,6 +523,7 @@ export function GoAlertModePicker() {
         label="Silenciar todo"
         sub="Sin globos, sin sonido, sin vibración"
         value={silentOn}
+        disabled={settingsSaving}
         color={RED}
         onToggle={toggleSilent}
       />

@@ -64,6 +64,20 @@ test("repeat refresh, repeated offsets and simultaneous requests do not duplicat
   await Promise.all([f.controller.refresh(A), f.controller.refresh(A), f.controller.refresh(A)]);
   assert.equal(f.pending.size, 1); assert.equal(f.calls.schedule.length, 1);
 });
+test("account category and quiet hours cancel existing device requests without deleting tasks", async () => {
+  const f = fixture(); await f.controller.setScope(A);
+  assert.equal(f.pending.size, 1);
+  f.controller.setPreferences({ enabled: false, quietHours: { enabled: false, start: "22:00", end: "08:00" } });
+  let result = await f.controller.refresh(A);
+  assert.equal(result[0].status, "muted"); assert.equal(f.pending.size, 0);
+  assert.equal(f.state.tasks.length, 1);
+  f.controller.setPreferences({ enabled: true, quietHours: { enabled: true, start: "15:00", end: "17:00" } });
+  result = await f.controller.refresh(A);
+  assert.equal(result[0].status, "muted"); assert.equal(f.pending.size, 0);
+  f.controller.setPreferences({ enabled: true, quietHours: { enabled: false, start: "15:00", end: "17:00" } });
+  result = await f.controller.refresh(A);
+  assert.equal(result[0].status, "scheduled"); assert.equal(f.pending.size, 1);
+});
 test("a new controller recovers the existing OS queue after an application restart", async () => {
   const f = fixture(); await f.controller.setScope(A); const second = model.createNativeReminderScheduler(f.ports);
   const result = await second.setScope(A); assert.equal(result[0].status, "scheduled");

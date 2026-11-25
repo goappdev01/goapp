@@ -19,7 +19,8 @@ import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { useGoNotification, GoAlertModePicker } from "@/contexts/GoNotificationContext";
+import { useGoNotification } from "@/contexts/GoNotificationContext";
+import { GoAlertsSettings } from "./GoAlertsSettings";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -29,7 +30,8 @@ type SubScreen =
   | "consumo"
   | "facturacion"
   | "privacidad"
-  | "ajustes";
+  | "ajustes"
+  | "alertas";
 
 interface PerfilPanelProps {
   visible: boolean;
@@ -224,6 +226,7 @@ export function PerfilPanel({ visible, onClose, onLogout, onOpenEmpresa, onOpenH
     facturacion: t("account_billing"),
     privacidad:  t("account_privacy"),
     ajustes:     t("account_settings_label"),
+    alertas:     "Alertas y alarmas",
   };
 
   // ─── Hub menu items (visible inside perfil_hub sub-screen) ─────────────────
@@ -411,7 +414,7 @@ export function PerfilPanel({ visible, onClose, onLogout, onOpenEmpresa, onOpenH
             {/* Sub-screen header */}
             <View style={s.subHeader}>
               <TouchableOpacity
-                onPress={() => setSubScreen(subScreen === "perfil_hub" ? null : "perfil_hub")}
+                onPress={() => setSubScreen(subScreen === "perfil_hub" ? null : subScreen === "alertas" ? "ajustes" : "perfil_hub")}
                 hitSlop={10}
                 style={s.backBtn}
               >
@@ -609,40 +612,15 @@ export function PerfilPanel({ visible, onClose, onLogout, onOpenEmpresa, onOpenH
                     </TouchableOpacity>
                   ))}
 
-                  {/* ── Notificaciones — 3 estados ───────────────────── */}
-                  <View style={{ paddingHorizontal: 16, paddingTop: 20, paddingBottom: 6 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                      <View style={{
-                        width: 28, height: 28, borderRadius: 8,
-                        backgroundColor: "#4A80BD18",
-                        alignItems: "center", justifyContent: "center",
-                      }}>
-                        <Feather
-                          name={alertMode === "sound" ? "bell" : alertMode === "visual" ? "eye" : "bell-off"}
-                          size={14}
-                          color="#4A80BD"
-                        />
-                      </View>
-                      <Text style={{ fontSize: 13, fontWeight: "700", color: "#111827" }}>
-                        {t("settings_notifs_label")}
-                      </Text>
-                      <View style={{
-                        marginLeft: "auto",
-                        paddingHorizontal: 8, paddingVertical: 3,
-                        borderRadius: 999,
-                        backgroundColor: alertMode === "silent" ? "rgba(156,163,175,0.12)" : "rgba(74,128,189,0.10)",
-                      }}>
-                        <Text style={{
-                          fontSize: 10, fontWeight: "700",
-                          color: alertMode === "silent" ? "#9CA3AF" : "#4A80BD",
-                          letterSpacing: 0.3,
-                        }}>
-                          {alertMode === "sound" ? "SONIDO" : alertMode === "visual" ? "VISUAL" : "SILENCIO"}
-                        </Text>
-                      </View>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Abrir Alertas y alarmas"
+                    onPress={() => setSubScreen("alertas")} style={s.listRow}>
+                    <View style={[s.listIcon, { backgroundColor: "#4A80BD18" }]}>
+                      <Feather name="bell" size={15} color="#4A80BD" />
                     </View>
-                    <GoAlertModePicker />
-                  </View>
+                    <View style={{ flex: 1 }}><Text style={s.listLabel}>Alertas y alarmas</Text>
+                      <Text style={s.listSub}>{alertMode === "sound" ? "Sonido" : alertMode === "visual" ? "Visual" : "Silencio"}</Text></View>
+                    <Feather name="chevron-right" size={15} color="#D1D5DB" />
+                  </TouchableOpacity>
 
                   {/* ── Mostrar ayudas otra vez ───────────────────────── */}
                   {onResetTutorial && (
@@ -690,6 +668,8 @@ export function PerfilPanel({ visible, onClose, onLogout, onOpenEmpresa, onOpenH
                 </>
               )}
 
+              {subScreen === "alertas" && <GoAlertsSettings />}
+
             </ScrollView>
           </>
         )}
@@ -702,7 +682,7 @@ export function PerfilPanel({ visible, onClose, onLogout, onOpenEmpresa, onOpenH
           maxH={subScreen!==null?138:64} buttonWidth={64}>
           {subScreen !== null && (
             <GoCloseButton level="panel" activeOpacity={0.8} onPress={() => setSubScreen(
-                subScreen === "perfil_hub" ? null : "perfil_hub"
+                subScreen === "perfil_hub" ? null : subScreen === "alertas" ? "ajustes" : "perfil_hub"
               )} hitSlop={8} accessibilityLabel="Volver" style={s.fabBtn}/>
           )}
           <GoCloseButton level="container" activeOpacity={0.8} onPress={onClose} hitSlop={8} accessibilityLabel="Cerrar Mi Perfil" style={s.fabBtn}/>

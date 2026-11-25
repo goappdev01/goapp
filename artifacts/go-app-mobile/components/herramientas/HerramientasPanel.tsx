@@ -24,6 +24,7 @@ import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { GUIDANCE_NAMES, GUIDANCE_NAMES_EN } from "../../utils/guidance";
 import { COUNTRY_CONFIGS, MARKET_STORAGE_KEY, REGION_STORAGE_KEY, type Market } from "../../utils/countryConfig";
+import { GoAlertsSettings } from "@/components/perfil/GoAlertsSettings";
 
 const GO_GOLD = "#C8A037";
 const BLUE    = "#4A80BD";
@@ -85,6 +86,7 @@ export function HerramientasPanel({
   // Dropdown states
   const [langOpen,    setLangOpen]    = useState(false);
   const [countryOpen, setCountryOpen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
 
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -565,6 +567,16 @@ export function HerramientasPanel({
             </View>
           </View>
 
+          <Text style={s.familyLabel}>ALERTAS</Text>
+          <View style={s.card}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Alertas y alarmas"
+              onPress={() => setAlertsOpen(value => !value)} style={s.compactRow}>
+              <View style={s.compactIconWrap}><Feather name="bell" size={17} color={BLUE} /></View>
+              <Text style={[s.compactTitle, { flex: 1 }]}>Alertas y alarmas</Text>
+              <Feather name={alertsOpen ? "chevron-up" : "chevron-down"} size={16} color={BLUE} />
+            </TouchableOpacity>
+            {alertsOpen && <GoAlertsSettings />}
+          </View>
         </ScrollView>
 
         {/* FAB cerrar — arrastrable con long-press */}

@@ -7,6 +7,7 @@ import { createNativeReminderScheduler, nativeReminderTaskInScope, type NativeRe
 import { createExpoReminderPorts } from "./goNativeNotificationAdapter";
 import { clearTaskNotificationFocus, focusTaskFromNotification } from "./goTaskNotificationFocus";
 import type { AlertMode } from "@/contexts/GoNotificationContext";
+import { inQuietHours, type GoAlertSettings } from "./goAlertPreferences";
 import { recordAlarmReconciliation, recordAlarmAttempt } from "./goAlarmIncidents";
 
 type CompletionPolicy = {
@@ -21,6 +22,7 @@ export function registerActionCompletionRuntime(policy: CompletionPolicy) {
 }
 let scope: TaskScope | null = null;
 let mode: AlertMode = "sound";
+let currentPreferences: GoAlertSettings | null = null;
 let revision = 0;
 let schedulerActivated = false;
 type RefreshFlight={expected:TaskScope;epoch:number;permission:boolean;dirty:boolean;promise:Promise<NativeReminderReport[]>};
@@ -47,7 +49,11 @@ async function persistedMode(): Promise<AlertMode> {
   const alert = values[0][1];
   return mode === "silent" || values[1][1] === "off" || alert === "silent" ? "silent" : alert === "visual" ? "visual" : mode;
 }
-export async function setNativeTaskReminderScope(value: TaskScope | null, alertMode: AlertMode): Promise<NativeReminderReport[]> {
+export async function setNativeTaskReminderScope(value: TaskScope | null, alertMode: AlertMode,
+  preferences?: GoAlertSettings, deviceHaptics = true): Promise<NativeReminderReport[]> {
+  currentPreferences = value && preferences ? preferences : null;
+  if (preferences) scheduler.setPreferences({ enabled: preferences.categories.task, quietHours: preferences.quietHours,
+    priority: preferences.priority, haptics: deviceHaptics });
   const previous = scope, changed = !same(scope, value), epoch = ++revision;
   scope = value ? { ...value } : null; mode = alertMode;
   if (changed || !value) schedulerActivated = false;
@@ -118,7 +124,7 @@ export function refreshNativeTaskReminders(expected: TaskScope, requestPermissio
 }
 export async function suspendNativeTaskReminders(): Promise<void> {
   const previous = scope;
-  ++revision; scope = null; schedulerActivated = false; publish(); clearTaskNotificationFocus();
+  ++revision; scope = null; currentPreferences = null; schedulerActivated = false; publish(); clearTaskNotificationFocus();
   const report = await scheduler.setScope(null, mode);
   await recordAlarmReconciliation(report,previous?.context || "live:USER",ports.platform);
   if (report.some(item => item.status === "failed")) throw new Error("Alarma no activada");
@@ -143,7 +149,8 @@ export async function canPresentNativeTaskReminder(data: Record<string, unknown>
   const expected = { userId: data.userId, context: data.context };
   if (!isNativeTaskScopeActive(expected)) return false;
   const [owner, rows, preference] = await Promise.all([getTaskUser(), readGoLog(), persistedMode()]);
-  if (owner !== expected.userId || preference === "silent" || !isNativeTaskScopeActive(expected)) return false;
+  if (owner !== expected.userId || preference === "silent" || currentPreferences?.categories.task === false
+    || (currentPreferences && inQuietHours(currentPreferences, Date.now())) || !isNativeTaskScopeActive(expected)) return false;
   if (data.goActionCompletion === true) {
     return !!await completionPolicy?.present(expected, data) && await getTaskUser() === expected.userId && isNativeTaskScopeActive(expected);
   }
@@ -164,5 +171,5 @@ export async function refreshActiveNativeTaskReminders(): Promise<void> {
 }
 
 export function pauseNativeTaskReminderRuntime(): void {
-  ++revision; scope = null; schedulerActivated = false; publish(); clearTaskNotificationFocus(); scheduler.pause();
+  ++revision; scope = null; currentPreferences = null; schedulerActivated = false; publish(); clearTaskNotificationFocus(); scheduler.pause();
 }

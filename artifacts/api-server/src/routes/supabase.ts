@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { bearerHeader, supabaseRequest } from "../lib/supabase";
 import { bookingCapabilities, createServiceBooking } from "../lib/bookingServiceContract";
+import { validGoAlertSettings } from "../lib/goAlertPreferencesContract";
 import { filterPublishedResources, internalModuleAccess, publishedBusinesses } from "../lib/modulePublication";
 
 const router: IRouter = Router();
@@ -177,6 +178,58 @@ router.get("/auth/me", async (req: Request, res: Response) => {
     user,
     profile: Array.isArray(profiles) ? (profiles[0] ?? null) : null,
   });
+});
+
+// Account preferences use the caller JWT throughout. RLS is the final ownership gate.
+async function alertPreferencesIdentity(req: Request, res: Response): Promise<{ userId: string; authorization: string } | null> {
+  const authorization = req.header("authorization");
+  if (!authorization?.match(/^Bearer \S+$/)) {
+    res.status(401).json({ code: "AUTH_REQUIRED" }); return null;
+  }
+  try {
+    const result = await supabaseRequest("/auth/v1/user", { headers: bearerHeader(authorization) });
+    const user = await result.json().catch(() => null) as { id?: unknown } | null;
+    if (!result.ok || typeof user?.id !== "string") {
+      res.status(401).json({ code: "AUTH_REQUIRED" }); return null;
+    }
+    return { userId: user.id, authorization };
+  } catch {
+    res.status(503).json({ code: "ALERT_PREFERENCES_UNAVAILABLE" }); return null;
+  }
+}
+
+router.get("/alert-preferences", async (req: Request, res: Response) => {
+  const identity = await alertPreferencesIdentity(req, res);
+  if (!identity) return;
+  try {
+    const query = new URLSearchParams({ select: "settings,updated_at", user_id: `eq.${identity.userId}`, limit: "1" });
+    const result = await supabaseRequest(`/rest/v1/go_alert_preferences?${query}`, { headers: bearerHeader(identity.authorization) });
+    if (!result.ok) { res.status(503).json({ code: "ALERT_PREFERENCES_UNAVAILABLE" }); return; }
+    const rows = await result.json().catch(() => null);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ settings: Array.isArray(rows) && rows.length === 1 ? rows[0].settings : null });
+  } catch { res.status(503).json({ code: "ALERT_PREFERENCES_UNAVAILABLE" }); }
+});
+
+router.put("/alert-preferences", async (req: Request, res: Response) => {
+  const identity = await alertPreferencesIdentity(req, res);
+  if (!identity) return;
+  if (!validGoAlertSettings(req.body?.settings)) {
+    res.status(400).json({ code: "INVALID_ALERT_PREFERENCES" }); return;
+  }
+  try {
+    const result = await supabaseRequest("/rest/v1/go_alert_preferences?on_conflict=user_id", {
+      method: "POST", headers: { ...bearerHeader(identity.authorization), "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify({ user_id: identity.userId, settings: req.body.settings }),
+    });
+    const rows = await result.json().catch(() => null);
+    if (!result.ok || !Array.isArray(rows) || rows.length !== 1 || !validGoAlertSettings(rows[0].settings)) {
+      res.status(503).json({ code: "ALERT_PREFERENCES_NOT_SAVED" }); return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ settings: rows[0].settings });
+  } catch { res.status(503).json({ code: "ALERT_PREFERENCES_NOT_SAVED" }); }
 });
 
 router.get("/businesses", async (req: Request, res: Response) => {

@@ -11,13 +11,13 @@ import { refreshNativeTaskReminders, setNativeTaskReminderScope, suspendNativeTa
 /** Invisible lifecycle bridge; the OS delivers scheduled alerts without this process. */
 export function GoTaskReminderInitializer() {
   const identity = useAssistantZoneScope();
-  const { alertMode } = useGoNotification();
-  const current = useRef(identity.ready ? identity.scope : null);
-  current.current = identity.ready ? identity.scope : null;
+  const { alertMode, settings, settingsReady, deviceHaptics } = useGoNotification();
+  const current = useRef(identity.ready && settingsReady ? identity.scope : null);
+  current.current = identity.ready && settingsReady ? identity.scope : null;
   const activationReady = useRef(false);
   const activationRevision = useRef(0);
   const activationKey = useRef("");
-  const nextKey = JSON.stringify([identity.ready, current.current?.userId, current.current?.context, alertMode]);
+  const nextKey = JSON.stringify([identity.ready, settingsReady, current.current?.userId, current.current?.context, settings, deviceHaptics]);
   if (activationKey.current !== nextKey) { activationKey.current = nextKey; activationReady.current = false; }
   const pendingTap = useRef<Notifications.NotificationResponse | null>(null);
   const consumedTap = useRef<string | null>(null);
@@ -58,14 +58,14 @@ export function GoTaskReminderInitializer() {
   useEffect(() => {
     const revision = ++activationRevision.current, setupKey = activationKey.current;
     activationReady.current = false;
-    safe(setNativeTaskReminderScope(current.current, alertMode).then(report => {
+    safe(setNativeTaskReminderScope(current.current, alertMode, settingsReady ? settings : undefined, deviceHaptics).then(report => {
       if (activationRevision.current !== revision || activationKey.current !== setupKey) return;
       if (report.some(item => item.status === "failed")) console.warn("[GO reminders] Native scheduling or cancellation incomplete.");
       activationReady.current = true;
       return handleTap();
     }));
     return () => { ++activationRevision.current; activationReady.current = false; };
-  }, [identity.ready, identity.scope?.userId, identity.scope?.context, alertMode]);
+  }, [identity.ready, identity.scope?.userId, identity.scope?.context, alertMode, settingsReady, settings, deviceHaptics]);
   useEffect(() => {
     if (Platform.OS === "web") return;
     const refresh = () => { const scope = current.current; if (scope) safe(refreshNativeTaskReminders(scope)); };

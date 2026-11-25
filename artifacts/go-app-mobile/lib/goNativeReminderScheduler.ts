@@ -10,7 +10,7 @@ export type NativeReminderReport = { taskId: string; minutes: number; status: Na
   cause?: string; completion?: { key: string; schedule: string } };
 export type NativeReminderRequest = {
   identifier: string; taskId: string; minutes: number; at: number; scope: TaskScope;
-  title: string; sound: boolean; signature: string;
+  title: string; sound: boolean; signature: string; haptics?: boolean; priority?: "standard" | "high";
   completion?: { key: string; schedule: string };
 };
 type NativeRequest = { identifier: string; data: Record<string, unknown> };
@@ -28,6 +28,8 @@ export type NativeReminderPorts = {
   now(): number;
 };
 type Mode = "sound" | "visual" | "silent";
+type ReminderPreferences = { enabled: boolean; haptics?: boolean; priority?: "standard" | "high";
+  quietHours: { enabled: boolean; start: string; end: string } };
 type Desired = NativeReminderRequest & { report: NativeReminderReport };
 
 /** These personal tasks use the OS queue instead of Landing's polling timers. */
@@ -76,6 +78,15 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
   }
   ports = guarded;
   let current: TaskScope | null = null, mode: Mode = "sound", generation = 0;
+  let preferences: ReminderPreferences = { enabled: true, quietHours: { enabled: false, start: "22:00", end: "08:00" } };
+  const quietAt = (at: number) => {
+    const { quietHours } = preferences;
+    if (!quietHours.enabled) return false;
+    const minute = new Date(at).getHours() * 60 + new Date(at).getMinutes();
+    const parse = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
+    const start = parse(quietHours.start), end = parse(quietHours.end);
+    return start === end || (start < end ? minute >= start && minute < end : minute >= start || minute < end);
+  };
   let queue: Promise<unknown> = Promise.resolve();
   let observed: NativeRequest[] = [];
   function enqueue(job: () => Promise<NativeReminderReport[]>): Promise<NativeReminderReport[]> {
@@ -151,18 +162,20 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
         const report: NativeReminderReport = { taskId: entry.id, minutes, identifier, status: "failed" };
         reports.push(report);
         if ((identifiers.get(entry.id) || 0) !== 1) { report.status = "invalid"; continue; }
-        if (entry.deleted || entry.estado === "rechazado" || entry.notificationsEnabled === false || selectedMode === "silent") {
+        if (entry.deleted || entry.estado === "rechazado" || entry.notificationsEnabled === false || selectedMode === "silent" || !preferences.enabled) {
           report.status = "muted"; continue;
         }
         let at: number;
         try { at = reminderTaskInstant(entry) - minutes * 60000; }
         catch { report.status = "invalid"; continue; }
         report.at = at;
+        if (quietAt(at)) { report.status = "muted"; continue; }
         deliveredSignature.set(identifier, [at, timezone, entry.notes || "Tarea"]);
         if (!Number.isFinite(at)) { report.status = "invalid"; continue; }
         if (at <= ports.now()) { report.status = "past"; continue; }
         desired.push({ identifier, taskId: entry.id, minutes, at, scope: { ...expected },
-          title: entry.notes || "Tarea", sound: selectedMode === "sound" && entry.reminderSound !== false, signature: "", report });
+          title: entry.notes || "Tarea", sound: selectedMode === "sound" && entry.reminderSound !== false,
+          haptics: preferences.haptics !== false, priority: preferences.priority || "standard", signature: "", report });
       }
     }
     if (ports.readCompletionRequests) {
@@ -183,8 +196,9 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
         const report: NativeReminderReport = { taskId: request.taskId, minutes: 0, at: request.at,
           identifier: request.identifier, status: "failed", completion: request.completion };
         reports.push(report);
-        if (selectedMode === "silent") { report.status = "muted"; continue; }
-        desired.push({ ...request, sound: selectedMode === "sound", report });
+        if (selectedMode === "silent" || !preferences.enabled || quietAt(request.at)) { report.status = "muted"; continue; }
+        desired.push({ ...request, sound: selectedMode === "sound", haptics: preferences.haptics !== false,
+          priority: preferences.priority || "standard", report });
         deliveredSignature.set(request.identifier, [request.at, timezone, request.title]);
       }
     }
@@ -201,7 +215,7 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
     allowed.slice(retained.length).forEach(item => { item.report.status = "capacity"; });
     retained.forEach(item => {
       item.sound = item.sound && permission !== "quiet";
-      item.signature = JSON.stringify([item.at, timezone, item.title, item.sound]);
+      item.signature = JSON.stringify([item.at, timezone, item.title, item.sound, item.haptics !== false, item.priority || "standard"]);
     });
     const wanted = new Map(retained.map(item => [item.identifier, item]));
     // Cancel obsolete schedules before creating anything; cancellation failure aborts the run.
@@ -299,6 +313,10 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
     const epoch = generation, expected = current;
     return enqueue(() => reconcile(epoch, expected, nextMode, requestPermission));
   }
+  function setPreferences(value: ReminderPreferences) {
+    preferences = value;
+    generation++;
+  }
   function refresh(scope: TaskScope, options: { requestPermission?: boolean; mode?:Mode } = {}): Promise<NativeReminderReport[]> {
     if (!sameScope(current, scope)) return Promise.resolve([]);
     if(options.mode&&options.mode!==mode){generation++;mode=options.mode;}
@@ -307,5 +325,5 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
   }
   // Unmount/HMR fences unfinished JS work, without removing already confirmed OS requests.
   function pause() { generation++; current = null; }
-  return { setScope, refresh, pause };
+  return { setScope, refresh, pause, setPreferences };
 }

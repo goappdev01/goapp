@@ -20,7 +20,7 @@ function fixture(){let rows=[task()],user="A",mode="sound",global="on",permissio
  const adapter=load("lib/goNativeNotificationAdapter.ts",{"react-native":{Platform:{OS:"ios"}},"expo-notifications":native});
  const bridge=load("lib/goTaskNotificationFocus.ts",{});bridge.onTaskNotificationFocus(v=>focus.push(v));
  const store={async readGoLog(){return JSON.parse(JSON.stringify(rows));}};
- function newRuntime(){return load("lib/goTaskReminderRuntime.ts",{"./goAlarmIncidents":load("lib/goAlarmIncidents.ts",{"@react-native-async-storage/async-storage":{default:storage}}),"@react-native-async-storage/async-storage":{default:storage},"./goLogStore":store,"./goNoteTools":load("lib/goNoteTools.ts",{}),"./goTaskAccess":access,"./goTaskReminders":reminders,"./goNativeReminderScheduler":scheduler,"./goNativeNotificationAdapter":adapter,"./goTaskNotificationFocus":bridge});}
+ function newRuntime(){return load("lib/goTaskReminderRuntime.ts",{"./goAlarmIncidents":load("lib/goAlarmIncidents.ts",{"@react-native-async-storage/async-storage":{default:storage}}),"@react-native-async-storage/async-storage":{default:storage},"./goLogStore":store,"./goNoteTools":load("lib/goNoteTools.ts",{}),"./goTaskAccess":access,"./goTaskReminders":reminders,"./goNativeReminderScheduler":scheduler,"./goNativeNotificationAdapter":adapter,"./goTaskNotificationFocus":bridge,"./goAlertPreferences":{inQuietHours:()=>false}});}
  const runtime=newRuntime();
  return{runtime,newRuntime,os,calls,native,focus,rows,update(value){rows=value;},user(value){user=value;},silent(){global="off";},permission(value){permission=value;},failCancel(value){failCancel=value;},wait(value){preferenceWait=value;},get requested(){return request;}};
 }
