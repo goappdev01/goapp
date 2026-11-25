@@ -165,7 +165,7 @@ test('calendar expanded reservation uses its existing proposal callback after de
  tree=f.render(AgendaBoard,props);
  const envelope=nodes(tree,n=>n.props.accessibilityLabel==='booking_state_pending').at(-1);assert.ok(envelope);assert.equal(nodes(envelope,n=>n.type==='Feather')[0].props.name,'mail','the yellow envelope controls Pending status, not GO messaging');
  const proposal=nodes(tree,n=>n.props.accessibilityLabel==='tasks_propose_change').at(-1);
- assert.ok(proposal,'expanded reservation proposal is available');assert.equal(proposal.props.style[1].borderColor,'#FF8C0080');assert.equal(proposal.props.style[1].shadowColor,'#FF8C00');assert.equal(proposal.props.style[1].minHeight,44);proposal.props.onPress();
+ assert.ok(proposal,'expanded reservation proposal is available');assert.equal(proposal.props.style[1].backgroundColor,'#FF8C00');assert.equal(proposal.props.style[1].borderColor,'#FF8C0080');assert.equal(proposal.props.style[1].shadowColor,'#FF8C00');assert.equal(nodes(proposal,n=>n.type==='Feather')[0].props.color,'#ffffff');assert.equal(proposal.props.style[1].minHeight,44);proposal.props.onPress();
  tree=f.render(AgendaBoard,props);
  const modal=nodes(tree,n=>n.props.testID==='entry-details-modal')[0];assert.equal(modal.props.visible,false);assert.deepEqual(proposed,[]);
  modal.props.onDismiss();assert.deepEqual(proposed,[base.id]);
@@ -226,11 +226,11 @@ test('opened and listed actions share solid semantic surfaces and white labels',
  const f=fixture(),c=f.load('components/GoEntryDetails.tsx');
  const received={...base,estado:'propuesto',changeProposal:{dateISO:'2030-10-27',date:'27/10/2030',time:'13:30',originalDateISO:base.dateISO,originalTime:base.time}};
  const open=f.render(c.GoEntryQuickActions,{entry:received,onReject(){},onPropose(){},onAccept(){}});
- const listed=f.render(c.GoListActionRow,{actions:[{key:'reject',label:'RECHAZAR',tone:'negative',onPress(){}},{key:'propose',label:'PROPONER',tone:'intermediate',onPress(){}},{key:'accept',label:'ACEPTAR',tone:'positive',onPress(){}}]});
+ const listed=f.render(c.GoListActionRow,{actions:[{key:'reject',label:'RECHAZAR',tone:'negative',onPress(){}},{key:'propose',label:'PROPONER',tone:'proposal',onPress(){}},{key:'accept',label:'ACEPTAR',tone:'positive',onPress(){}}]});
   const actual=nodes(open,n=>n.type==='TouchableOpacity').map(n=>[n.props.style.at(-1).backgroundColor,n.props.style.at(-1).borderColor,n.props.style.at(-1).shadowColor,n.props.style.at(-1).shadowRadius]);
   const expected=nodes(listed,n=>n.type==='TouchableOpacity').map(n=>[n.props.style.backgroundColor,n.props.style.borderColor,n.props.style.shadowColor,n.props.style.shadowRadius]);
  assert.deepEqual(actual,expected);
-  assert.deepEqual(actual.map(row=>row[0]),['#D92D32','#C25300','#008754']);
+  assert.deepEqual(actual.map(row=>row[0]),['#D92D32','#FF8C00','#008754']);
   assert.ok(actual.every(row=>row[2]==='#000000'),'all action shadows remain neutral');
  assert.ok(nodes(open,n=>n.type==='TouchableOpacity').every(n=>nodes(n,x=>x.type==='Text')[0].props.style.color==='#FFFFFF'));
  const pending=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'pending'},onDone(){},onPending(){},onDiscard(){}});
@@ -264,8 +264,8 @@ test('PENDIENTE is white directly on yellow in list and detail while PROPONER re
   assert.equal(landingLabel.props.style.borderRadius,undefined);
   assert.equal(landingLabel.props.style.paddingHorizontal,undefined);
   assert.equal(landingLabel.props.style.textShadowColor,'#282828');
-  const proposal=f.render(c.GoListActionRow,{actions:[{key:'propose',label:'PROPONER',tone:'intermediate',onPress(){}}]});
-  assert.equal(nodes(proposal,n=>n.type==='TouchableOpacity')[0].props.style.backgroundColor,'#C25300');
+  const proposal=f.render(c.GoListActionRow,{actions:[{key:'propose',label:'PROPONER',tone:'proposal',onPress(){}}]});
+  assert.equal(nodes(proposal,n=>n.type==='TouchableOpacity')[0].props.style.backgroundColor,'#FF8C00');
 });
 test('received proposals keep orange identity and the original date until the existing acceptance command',()=>{
  const entry={...base,estado:'propuesto',changeProposal:{dateISO:'2030-10-27',date:'27/10/2030',time:'13:30',originalDateISO:base.dateISO,originalTime:base.time}};

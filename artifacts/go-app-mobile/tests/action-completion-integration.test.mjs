@@ -124,7 +124,7 @@ test('Landing highlights only the persisted follow-up decision and keeps proposa
   const unselected=status==='pending'?done:pending;
   assert.equal(unselected.props.style.borderWidth,1);
   assert.ok(nodes(unselected,n=>n.type==='View'&&n.props.style?.borderBottomColor==='rgba(0,0,0,0.13)').length>0);
-  assert.equal(proposal.props.style.backgroundColor,'#C25300');
+  assert.equal(proposal.props.style.backgroundColor,'#FF8C00');
  }
 });
 test('multiple unresolved/pending actions are reviewed individually and never disappear on a tab or close',()=>{

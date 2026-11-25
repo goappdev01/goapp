@@ -125,6 +125,6 @@ test('actions swipe uses the existing horizontal thresholds and selects the next
   assert.equal(c.onMoveShouldSetResponder(null,{dx:-25,dy:1}),true);
   await React.act(()=>c.onResponderRelease(null,{dx:-25,dy:1}));assert.deepEqual(f.calls,[['selected','b']]);
   const pending=f.props.find(p=>p.accessibilityLabel==='PENDIENTE'),change=f.props.find(p=>p.accessibilityLabel==='PROPONER CAMBIO');
-  assert.equal(pending.children.props.style.color,'#ffffff');assert.equal(change.style.backgroundColor,'#C25300');
+  assert.equal(pending.children.props.style.color,'#ffffff');assert.equal(change.style.backgroundColor,'#FF8C00');
  }finally{await f.close()}
 });

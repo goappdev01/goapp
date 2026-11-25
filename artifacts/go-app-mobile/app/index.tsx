@@ -8046,6 +8046,17 @@ function HomeScreenContent() {
   const acceptProposal = (id: string) => {
     const booking=customerBookings.entries.find(entry=>entry.id===id);if(booking){respondCustomerBooking(booking,"accept");return;}
     const entry = goLog.find((e) => e.id === id);
+    if (entry?.customerBooking || entry?.businessBooking) {
+      const proposal=entry.changeProposal as import("@/data/booking").BookingChangeProposal|undefined;
+      if (!proposal || !entry.ownerUserId) { Alert.alert("GO", "No se puede verificar la propuesta o la cuenta. Actualiza la reserva."); return; }
+      Alert.alert(lang==="en"?"Change proposal":"Propuesta de cambio",bookingProposalDescription(proposal,lang),[
+        {text:lang==="en"?"Cancel":"Cancelar",style:"cancel"},
+        {text:lang==="en"?"Accept":"Aceptar",onPress:()=>{void negotiateRealBooking(String(entry.reservationId),"accept",{
+          proposalId:proposal.id,expectedRevision:entry.bookingChangeRevision??0,acceptFinancialTerms:true},entry.ownerUserId!)
+          .then(()=>showToast(lang==="en"?"Reservation updated":"Reserva actualizada","success"))
+          .catch(error=>showBookingChangeError(error));}},
+      ]);return;
+    }
     const cp    = entry ? (entry as any).changeProposal : null;
 
     // ── Anti-solape: comprobar ANTES de aceptar ─────────────────────────────
@@ -8217,6 +8228,14 @@ function HomeScreenContent() {
   // También calcula huecos alternativos y los muestra bajo la tarjeta.
   const rejectProposal = (id: string) => {
     const booking=customerBookings.entries.find(entry=>entry.id===id);if(booking){respondCustomerBooking(booking,"reject");return;}
+    const liveEntry=goLog.find(entry=>entry.id===id);
+    if (liveEntry?.customerBooking || liveEntry?.businessBooking) {
+      if (!liveEntry.changeProposal?.id || !liveEntry.ownerUserId) { Alert.alert("GO", "No se puede verificar la propuesta o la cuenta. Actualiza la reserva."); return; }
+      void negotiateRealBooking(String(liveEntry.reservationId),"reject",{
+        proposalId:liveEntry.changeProposal.id,expectedRevision:liveEntry.bookingChangeRevision??0},liveEntry.ownerUserId)
+        .then(()=>showToast(lang==="en"?"Reservation updated":"Reserva actualizada","success"))
+        .catch(error=>showBookingChangeError(error));return;
+    }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
     // Calcular alternativas ANTES de modificar el estado (goLog aún tiene el entry original)
     const entry = goLog.find((e) => e.id === id);

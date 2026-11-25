@@ -33,7 +33,7 @@ export type GoEntryActionCallbacks = {
 export type GoListAction = {
   key: string;
   label: string;
-  tone: "negative" | "pending" | "intermediate" | "positive";
+  tone: "negative" | "pending" | "intermediate" | "proposal" | "positive";
   onPress: () => void;
   selected?: boolean;
   selectable?: boolean;
@@ -47,6 +47,7 @@ const GO_ACTION_PALETTE = {
   negative:"#D92D32",
   pending:GO_PENDING_ACTION_YELLOW,
   intermediate:"#C25300",
+  proposal:C.change,
   positive:GO_DONE_ACTION_GREEN,
 };
 function goActionVisual(tone:GoListAction["tone"],selected=false,inactive=false,pressed=false){
@@ -143,7 +144,7 @@ export function GoEntryQuickActions({ entry, showState = true, compact = false, 
     {pending && <Text numberOfLines={1} style={{color:received?C.change:C.pending,fontSize:compact?10:13,fontWeight:"700"}}>{received ? (lang === "en" ? "Change received · pending" : "Cambio recibido · pendiente") : (lang === "en" ? "Change · awaiting response" : "Cambio · esperando respuesta")}</Text>}
     {active && <View style={[s.actions, compact && {flexWrap:"nowrap",gap:6}]}>
       {button(received ? (lang === "en" ? "REJECT" : "RECHAZAR") : (lang === "en" ? "CANCEL" : "CANCELAR"), "negative", received ? actions.onReject : actions.onCancel)}
-      {button(internal ? (lang === "en" ? "EDIT" : "MODIFICAR") : received ? (lang === "en" ? "PROPOSE" : "PROPONER") : (lang === "en" ? "PROPOSE CHANGE" : "PROPONER CAMBIO"), "intermediate", internal ? actions.onEdit : actions.onPropose)}
+      {button(internal ? (lang === "en" ? "EDIT" : "MODIFICAR") : received ? (lang === "en" ? "PROPOSE" : "PROPONER") : (lang === "en" ? "PROPOSE CHANGE" : "PROPONER CAMBIO"), internal ? "intermediate" : "proposal", internal ? actions.onEdit : actions.onPropose)}
       {(received || canonical && policy.canConfirm || !canonical && !internal && entry.kind === "received" && entry.estado === "pendiente")
         && button(lang === "en" ? "ACCEPT" : "ACEPTAR", "positive", received ? actions.onAccept : canonical ? actions.onConfirm : actions.onAccept)}
     </View>}
