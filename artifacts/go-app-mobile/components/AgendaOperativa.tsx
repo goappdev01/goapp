@@ -1889,7 +1889,7 @@ export function AgendaBoard({
     const names = { pendiente: t("booking_state_pending"), aceptado: t("booking_state_accepted"), rechazado: t("booking_state_rejected"), propuesto: t("tasks_propose_change"), propuesta_pendiente: t("tasks_propose_change") };
     return <View style={expanded ? { flexDirection: "row", gap: 10, marginBottom: 14 } : s.estadoRow}>
       {ESTADO_OPTIONS.map(opt => {
-        const active = opt.key === "propuesto" ? !!item.changeProposal : opt.key === "aceptado" ? policy.stateKey === "booking_state_accepted" : opt.key === "rechazado" ? ["booking_state_cancelled","booking_state_rejected"].includes(policy.stateKey) : policy.stateKey === "booking_state_pending";
+        const active = opt.key === "propuesto" ? policy.proposalActive : opt.key === "aceptado" ? policy.stateKey === "booking_state_accepted" : opt.key === "rechazado" ? ["booking_state_cancelled","booking_state_rejected"].includes(policy.stateKey) : policy.stateKey === "booking_state_pending";
         const pressedKey = `${item.id}:${opt.key}`;
         const pressed = expanded && pressedDetailControl === pressedKey;
         const perform = opt.key === "propuesto" && policy.canPropose && onProposeItem ? () => onProposeItem(item.id)
@@ -1899,8 +1899,8 @@ export function AgendaBoard({
           : opt.key === "aceptado" && policy.canConfirm && onConfirmBooking ? () => onConfirmBooking(item.id) : undefined;
         return <TouchableOpacity key={opt.key} accessibilityRole="button" accessibilityLabel={names[opt.key]} accessibilityState={{ selected: active, disabled: !perform }} activeOpacity={expanded ? 0.82 : 0.8}
           disabled={!perform} onPressIn={expanded?()=>setPressedDetailControl(pressedKey):undefined} onPressOut={expanded?()=>setPressedDetailControl(null):undefined} onPress={() => { if (!perform) return; Haptics.selectionAsync().catch(() => {}); if (expanded && opt.key === "propuesto" && dismissThen) { dismissThen(perform); return; } if (expanded) { setExpandedBookingItem(null); setExpandedCardId(null); } perform(); }}
-          style={[s.estadoPill, { flex: 1, minHeight: expanded ? 44 : 30, backgroundColor: opt.key === "propuesto" ? opt.color : active ? opt.color : expanded && perform ? opt.color + "18" : "transparent", borderColor: opt.key === "propuesto" && active ? "#ffffff" : opt.color + "80", ...(expanded && {borderWidth:1.5,opacity:opt.key === "propuesto" ? pressed ? 0.88 : 1 : perform?pressed?0.88:1:0.48,shadowColor:opt.color,shadowOffset:{width:0,height:2},shadowOpacity:perform&&!pressed?0.2:0.06,shadowRadius:3,elevation:perform&&!pressed?2:0,transform:[{translateY:pressed?1:0}]}) }]}>
-          <Feather name={(active ? opt.icon : opt.iconInactive) as any} size={expanded ? 18 : 12} color={opt.key === "propuesto" ? "#ffffff" : active ? "#101018" : opt.color + "90"} />
+          style={[s.estadoPill, { flex: 1, minHeight: expanded ? 44 : 30, backgroundColor: active ? opt.color : expanded && perform ? opt.color + "18" : "transparent", borderColor: opt.key === "propuesto" && active ? "#ffffff" : opt.color + "80", ...(expanded && {borderWidth:1.5,opacity:perform?pressed?0.88:1:0.48,shadowColor:opt.color,shadowOffset:{width:0,height:2},shadowOpacity:perform&&!pressed?0.2:0.06,shadowRadius:3,elevation:perform&&!pressed?2:0,transform:[{translateY:pressed?1:0}]}) }]}>
+          <Feather name={(active ? opt.icon : opt.iconInactive) as any} size={expanded ? 18 : 12} color={opt.key === "propuesto" && active ? "#ffffff" : active ? "#101018" : opt.color + "90"} />
         </TouchableOpacity>;
       })}
     </View>;

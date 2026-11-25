@@ -165,7 +165,7 @@ test('calendar expanded reservation uses its existing proposal callback after de
  tree=f.render(AgendaBoard,props);
  const envelope=nodes(tree,n=>n.props.accessibilityLabel==='booking_state_pending').at(-1);assert.ok(envelope);assert.equal(nodes(envelope,n=>n.type==='Feather')[0].props.name,'mail','the yellow envelope controls Pending status, not GO messaging');
  const proposal=nodes(tree,n=>n.props.accessibilityLabel==='tasks_propose_change').at(-1);
- assert.ok(proposal,'expanded reservation proposal is available');assert.equal(proposal.props.style[1].backgroundColor,'#FF8C00');assert.equal(proposal.props.style[1].borderColor,'#FF8C0080');assert.equal(proposal.props.style[1].shadowColor,'#FF8C00');assert.equal(nodes(proposal,n=>n.type==='Feather')[0].props.color,'#ffffff');assert.equal(proposal.props.style[1].minHeight,44);proposal.props.onPress();
+ assert.ok(proposal,'expanded reservation proposal is available');assert.equal(proposal.props.style[1].backgroundColor,'#FF8C0018');assert.equal(proposal.props.style[1].borderColor,'#FF8C0080');assert.equal(proposal.props.style[1].shadowColor,'#FF8C00');assert.equal(nodes(proposal,n=>n.type==='Feather')[0].props.color,'#FF8C0090');assert.equal(proposal.props.style[1].minHeight,44);proposal.props.onPress();
  tree=f.render(AgendaBoard,props);
  const modal=nodes(tree,n=>n.props.testID==='entry-details-modal')[0];assert.equal(modal.props.visible,false);assert.deepEqual(proposed,[]);
  modal.props.onDismiss();assert.deepEqual(proposed,[base.id]);

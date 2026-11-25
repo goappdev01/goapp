@@ -11,9 +11,10 @@ export function reservationCardPolicy(entry:GoEntry){
  const status=terminal ? server : entry.bookingStatus ?? (server && ["CONFIRMED","ACCEPTED"].includes(server) ? "confirmada"
   : server === "PENDING" ? "pendiente" : entry.estado === "aceptado" ? "confirmada" : entry.estado === "rechazado" ? "cancelada" : "pendiente");
  const active=canonical && !entry.deleted && ["pendiente","confirmada","cambio_pendiente"].includes(status);
- const received=active && !!entry.changeProposal && entry.estado==="propuesto";
+ const proposalActive=active && !!entry.changeProposal && ["propuesto","propuesta_pendiente"].includes(entry.estado);
+ const received=proposalActive && entry.estado==="propuesto";
  const real=/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(entry.reservationId??""));
- return {canonical,active,received,canCancel:active,canPropose:active,
+ return {canonical,active,proposalActive,received,canCancel:active,canPropose:active,
   canConfirm:real && active && !!entry.businessBooking && status==="pendiente" && !entry.changeProposal,
   canShowQr:real && !!entry.customerBooking && status==="confirmada" && !entry.deleted,
   canVerify:real && !!entry.businessBooking,
