@@ -74,7 +74,7 @@ export function GoListActionRow({actions,handedness="right",scale=1,testID="list
         {inactive && (action.tone==="pending"||action.tone==="positive") && <View pointerEvents="none" accessible={false} style={GO_FOLLOW_UP_UNSELECTED_FINISH}/>}
         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.8}
           style={{color:"#FFFFFF",fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",minWidth:0,
-            alignSelf:"stretch",width:"100%",...(action.tone==="pending"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{action.label}{action.selected?" ✓":""}</Text>
+            alignSelf:"stretch",width:"100%",...(action.tone==="pending"||action.tone==="proposal"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{action.label}{action.selected?" ✓":""}</Text>
       </TouchableOpacity>;
     })}
   </View>;
@@ -136,7 +136,7 @@ export function GoEntryQuickActions({ entry, showState = true, compact = false, 
     : entry.localResolutionStatus === "pending" ? (lang === "en" ? "PENDING" : "PENDIENTE")
     : accepted ? (lang === "en" ? "ACCEPTED" : "ACEPTADA") : entry.estado === "rechazado" ? (lang === "en" ? "CANCELLED" : "CANCELADA") : (lang === "en" ? "PENDING" : "PENDIENTE");
   const pending = entryProposalPending(entry);
-  const button = (label: string, tone: GoListAction["tone"], callback?: () => void) => callback && <TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} activeOpacity={compact?0.72:0.82} onPressIn={compact?undefined:()=>setPressed(label)} onPressOut={compact?undefined:()=>setPressed(null)} onPress={event => { event?.stopPropagation(); callback(); }} style={[s.action, compact && s.compactAction, goActionVisual(tone,false,false,pressed===label)]}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{ color:"#FFFFFF", fontSize: compact ? 10 : 12, fontWeight: "800", textAlign: "center" }}>{label}</Text></TouchableOpacity>;
+  const button = (label: string, tone: GoListAction["tone"], callback?: () => void) => callback && <TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} activeOpacity={compact?0.72:0.82} onPressIn={compact?undefined:()=>setPressed(label)} onPressOut={compact?undefined:()=>setPressed(null)} onPress={event => { event?.stopPropagation(); callback(); }} style={[s.action, compact && s.compactAction, goActionVisual(tone,false,false,pressed===label)]}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{ color:"#FFFFFF", fontSize: compact ? 10 : 12, fontWeight: "800", textAlign: "center", ...(tone==="proposal"?GO_PENDING_ACTION_TEXT_SHADOW:{}) }}>{label}</Text></TouchableOpacity>;
   const stateLabel = <Text numberOfLines={1} style={{ color: canonical ? policy.stateColor : entry.localResolutionStatus==="done"?C.done:entry.localResolutionStatus==="pending"?C.pending:accepted?C.accepted:entry.estado==="rechazado"?C.destructive:C.pending, fontSize: compact ? 10 : 13, fontWeight: "800" }}>{pending ? "Original: " : ""}{state}</Text>;
   if(stateOnly)return stateLabel;
   return <View testID="entry-quick-actions" style={{ gap: compact ? 4 : 8 }}>

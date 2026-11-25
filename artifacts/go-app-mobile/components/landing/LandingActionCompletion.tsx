@@ -96,7 +96,7 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
       style={{width:side,height:decisionHeight,minWidth:44,minHeight:44,borderRadius:14,borderWidth:selected?1.5:1,borderColor:selected?"#ffffff":action.color,
        backgroundColor:action.background,alignItems:"center",justifyContent:"center",padding:4,opacity:model.isSaving?.(entry)?0.45:1}}>
       {inactive&&<View pointerEvents="none" accessible={false} style={{...GO_FOLLOW_UP_UNSELECTED_FINISH,borderRadius:13}}/>}
-      <Text numberOfLines={action.status==="change"?2:1} adjustsFontSizeToFit minimumFontScale={0.85} style={{width:"100%",maxWidth:"100%",color:action.ink,fontSize:12,fontWeight:"700",textAlign:"center",...(action.status==="pending"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{en?action.en:action.es}</Text>
+      <Text numberOfLines={action.status==="change"?2:1} adjustsFontSizeToFit minimumFontScale={0.85} style={{width:"100%",maxWidth:"100%",color:action.ink,fontSize:12,fontWeight:"700",textAlign:"center",...(action.status==="pending"||action.status==="change"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{en?action.en:action.es}</Text>
      </TouchableOpacity>})}
    </View>
 
