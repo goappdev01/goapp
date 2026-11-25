@@ -19,9 +19,9 @@ test('only awaiting response becomes vivid yellow in the detail and shared chang
   const entry={...base,estado,changeProposal:{dateISO:'2030-10-27',time:'13:00'}};
   const tree=f.render(c.GoEntryDetailsSheet,{entry,onClose(){}}),state=nodes(tree,n=>n.props.testID==='entry-proposal-state')[0];
   assert.equal(texts(state),estado==='propuesto'?'CAMBIO RECIBIDO':'ESPERANDO RESPUESTA');
-  assert.equal(state.props.style.color,estado==='propuesto'?'#D1A166':'#D9AD00');
+  assert.equal(state.props.style.color,estado==='propuesto'?'#D1A166':'#E8BB2E');
   const quick=f.render(c.GoEntryQuickActions,{entry});
-  assert.equal(nodes(quick,n=>n.type==='Text'&&texts(n).startsWith('Cambio'))[0].props.style.color,estado==='propuesto'?'#FF8C00':'#D9AD00');
+  assert.equal(nodes(quick,n=>n.type==='Text'&&texts(n).startsWith('Cambio'))[0].props.style.color,estado==='propuesto'?'#FF8C00':'#E8BB2E');
  }
 });
 
@@ -235,10 +235,10 @@ test('opened and listed actions share solid semantic surfaces and white labels',
  assert.ok(nodes(open,n=>n.type==='TouchableOpacity').every(n=>nodes(n,x=>x.type==='Text')[0].props.style.color==='#FFFFFF'));
  const pending=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'pending'},onDone(){},onPending(){},onDiscard(){}});
  const done=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'done'},onDone(){},onPending(){},onDiscard(){}});
-  assert.equal(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0].props.style.backgroundColor,'#D9AD00');
+  assert.equal(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0].props.style.backgroundColor,'#E8BB2E');
    assert.equal(nodes(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0],n=>n.type==='Text')[0].props.style.color,'#FFFFFF');
-  assert.equal(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0].props.style.backgroundColor,'#145F45');
-  assert.equal(nodes(done,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0].props.style.backgroundColor,'#8A7400');
+  assert.equal(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0].props.style.backgroundColor,'#008754');
+  assert.equal(nodes(done,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0].props.style.backgroundColor,'#E8BB2E');
   assert.equal(nodes(done,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0].props.style.backgroundColor,'#008754');
 });
 test('PENDIENTE is white directly on yellow in list and detail while PROPONER remains orange',()=>{
@@ -246,22 +246,24 @@ test('PENDIENTE is white directly on yellow in list and detail while PROPONER re
   for(const selected of [true,false]){
     const row=f.render(c.GoListActionRow,{actions:[{key:'pending',label:'PENDIENTE',tone:'pending',selectable:true,selected,onPress(){}}]});
     const button=nodes(row,n=>n.type==='TouchableOpacity')[0],text=nodes(button,n=>n.type==='Text')[0];
-    assert.equal(button.props.style.backgroundColor,selected?'#D9AD00':'#8A7400');
+    assert.equal(button.props.style.backgroundColor,'#E8BB2E');
+    assert.equal(button.props.style.borderWidth,selected?1.5:1);
+    assert.equal(nodes(button,n=>n.type==='View'&&n.props.style?.borderBottomColor==='rgba(0,0,0,0.13)').length,selected?0:1);
     assert.equal(text.props.style.color,'#FFFFFF');
     assert.equal(text.props.style.backgroundColor,undefined);
     assert.equal(text.props.style.borderWidth,undefined);
     assert.equal(text.props.style.paddingHorizontal,undefined);
-    assert.equal(text.props.style.textShadowColor,'#3b3000');
+    assert.equal(text.props.style.textShadowColor,'#282828');
   }
   const landing=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'pending'},pendingYellow:true,onDone(){},onPending(){},onDiscard(){}});
   const landingPending=nodes(landing,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0];
-  assert.equal(landingPending.props.style.backgroundColor,'#D9AD00');
+  assert.equal(landingPending.props.style.backgroundColor,'#E8BB2E');
   const landingLabel=nodes(landingPending,n=>n.type==='Text')[0];
   assert.equal(landingLabel.props.style.color,'#FFFFFF');
   assert.equal(landingLabel.props.style.backgroundColor,undefined);
   assert.equal(landingLabel.props.style.borderRadius,undefined);
   assert.equal(landingLabel.props.style.paddingHorizontal,undefined);
-  assert.equal(landingLabel.props.style.textShadowColor,'#3b3000');
+  assert.equal(landingLabel.props.style.textShadowColor,'#282828');
   const proposal=f.render(c.GoListActionRow,{actions:[{key:'propose',label:'PROPONER',tone:'intermediate',onPress(){}}]});
   assert.equal(nodes(proposal,n=>n.type==='TouchableOpacity')[0].props.style.backgroundColor,'#C25300');
 });
@@ -348,7 +350,7 @@ for(const type of ['GO_BOOKING','TAREA_INTERNA'])test(`${type}: opening/closing 
 
 test('state colors and negative actions agree in compact and expanded cards without changing category colors',()=>{
  const f=fixture(),c=f.load('components/GoEntryDetails.tsx'),policy=f.load('data/reservationCardPolicy.ts'),original=JSON.stringify(base);
- for(const [status,key,color]of [['pendiente','booking_state_pending','#D9AD00'],['confirmada','booking_state_accepted','#22c55e'],['completada','booking_state_completed','#22c55e'],['cancelada','booking_state_cancelled','#FF0000']]){
+ for(const [status,key,color]of [['pendiente','booking_state_pending','#E8BB2E'],['confirmada','booking_state_accepted','#22c55e'],['completada','booking_state_completed','#22c55e'],['cancelada','booking_state_cancelled','#FF0000']]){
   const entry={...base,bookingStatus:status};assert.equal(policy.reservationCardPolicy(entry).stateColor,color);assert.equal(policy.reservationCardPolicy(entry).stateKey,key);
   for(const compact of [false,true]){const tree=f.render(c.GoEntryQuickActions,{entry,compact,onCancel(){},onPropose(){}});const state=nodes(tree,n=>n.type==='Text')[0];assert.equal(state.props.style.color,color);
     for(const action of nodes(tree,n=>n.props.accessibilityLabel==='CANCELAR')){assert.equal(action.props.style.at(-1).backgroundColor,'#D92D32');assert.equal(action.props.style.at(-1).borderColor,'rgba(255,255,255,0.22)');}}

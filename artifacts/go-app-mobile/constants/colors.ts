@@ -1,11 +1,20 @@
-export const GO_PENDING_ACTION_YELLOW = "#D9AD00";
-export const GO_PENDING_ACTION_MUTED_YELLOW = "#8A7400";
-export const GO_DONE_ACTION_MUTED_GREEN = "#145F45";
+export const GO_PENDING_ACTION_YELLOW = "#E8BB2E";
+export const GO_DONE_ACTION_GREEN = "#008754";
 export const GO_PENDING_YELLOW = GO_PENDING_ACTION_YELLOW;
-// White lettering sits directly on yellow. A small glyph shadow aids reading
-// without creating an inset badge or changing the button's dimensions.
+// A translucent top highlight and bottom inset edge distinguish an unselected
+// follow-up button without changing its corporate fill or touch geometry.
+export const GO_FOLLOW_UP_UNSELECTED_FINISH = {
+  position: "absolute",
+  top: 1, right: 1, bottom: 1, left: 1,
+  borderRadius: 7,
+  borderTopWidth: 1,
+  borderTopColor: "rgba(255,255,255,0.20)",
+  borderBottomWidth: 1,
+  borderBottomColor: "rgba(0,0,0,0.13)",
+} as const;
+// White lettering sits directly on yellow, without an inset label.
 export const GO_PENDING_ACTION_TEXT_SHADOW = {
-  textShadowColor: "#3b3000",
+  textShadowColor: "#282828",
   textShadowOffset: { width: 0, height: 1 },
   textShadowRadius: 2,
 } as const;

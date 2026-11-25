@@ -105,11 +105,11 @@ test('real confirmation buttons dispatch exactly one personal decision or open t
  const choices=nodes(tree,n=>['REALIZADO','PENDIENTE','PROPONER CAMBIO'].includes(n.props.accessibilityLabel));assert.equal(choices.length,6,'same controls exist in the inline area and hidden modal');
  for(const label of ['REALIZADO','PENDIENTE','PROPONER CAMBIO']){const b=choices.find(n=>n.props.accessibilityLabel===label);assert.equal(b.props.style.height,48);assert.ok(b.props.style.width>=44);assert.ok(b.props.style.minHeight>=44);b.props.onPress();}
  const pending=choices.find(n=>n.props.accessibilityLabel==='PENDIENTE');
- assert.equal(pending.props.style.backgroundColor,'#D9AD00');
+ assert.equal(pending.props.style.backgroundColor,'#E8BB2E');
  assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.color.toUpperCase(),'#FFFFFF');
  assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.backgroundColor,undefined);
  assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.paddingHorizontal,undefined);
- assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.textShadowColor,'#3b3000');
+ assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.textShadowColor,'#282828');
  assert.deepEqual(calls,[['one','done'],['one','pending']]);assert.deepEqual(ui.calls,[['propose','one']]);assert.equal(e.changeProposal,undefined);
 });
 test('Landing highlights only the persisted follow-up decision and keeps proposal unchanged',()=>{
@@ -118,9 +118,12 @@ test('Landing highlights only the persisted follow-up decision and keeps proposa
  for(const status of ["pending","done"]){
   model.status=()=>status;
   const tree=ui.render(),pending=nodes(tree,n=>n.props.accessibilityLabel==='PENDIENTE')[0],done=nodes(tree,n=>n.props.accessibilityLabel==='REALIZADO')[0],proposal=nodes(tree,n=>n.props.accessibilityLabel==='PROPONER CAMBIO')[0];
-  assert.equal(pending.props.style.backgroundColor,status==='pending'?'#D9AD00':'#8A7400');
-  assert.equal(done.props.style.backgroundColor,status==='done'?'#167346':'#145F45');
-  assert.equal((status==='pending'?pending:done).props.style.borderWidth,2);
+  assert.equal(pending.props.style.backgroundColor,'#E8BB2E');
+  assert.equal(done.props.style.backgroundColor,'#008754');
+  assert.equal((status==='pending'?pending:done).props.style.borderWidth,1.5);
+  const unselected=status==='pending'?done:pending;
+  assert.equal(unselected.props.style.borderWidth,1);
+  assert.ok(nodes(unselected,n=>n.type==='View'&&n.props.style?.borderBottomColor==='rgba(0,0,0,0.13)').length>0);
   assert.equal(proposal.props.style.backgroundColor,'#C25300');
  }
 });

@@ -11,7 +11,7 @@ import { reservationCardPolicy, GO_ENTRY_COLORS as C } from "@/data/reservationC
 import { GoCloseButton } from "./ui/GoCloseButton";
 import { landingCurrentEntry } from "./landing/landingPanels";
 import { GoScreenCloseSurface, GoScreenCloseGuide } from "@/components/ui/GoScreenCloseSurface";
-import { GO_DONE_ACTION_MUTED_GREEN, GO_PENDING_ACTION_MUTED_YELLOW, GO_PENDING_ACTION_YELLOW, GO_PENDING_ACTION_TEXT_SHADOW } from "../constants/colors";
+import { GO_DONE_ACTION_GREEN, GO_FOLLOW_UP_UNSELECTED_FINISH, GO_PENDING_ACTION_YELLOW, GO_PENDING_ACTION_TEXT_SHADOW } from "../constants/colors";
 
 export function GoEntryCommunication({ entry }: { entry: GoEntry }) {
   const { lang } = useLanguage();
@@ -44,16 +44,15 @@ export type GoListAction = {
 
 /** Shared visual language for Listados and opened entry actions. */
 const GO_ACTION_PALETTE = {
-  negative:{base:"#D92D32",muted:"#D92D32"},
-  pending:{base:GO_PENDING_ACTION_YELLOW,muted:GO_PENDING_ACTION_MUTED_YELLOW},
-  intermediate:{base:"#C25300",muted:"#B75000"},
-  positive:{base:"#008754",muted:GO_DONE_ACTION_MUTED_GREEN},
+  negative:"#D92D32",
+  pending:GO_PENDING_ACTION_YELLOW,
+  intermediate:"#C25300",
+  positive:GO_DONE_ACTION_GREEN,
 };
 function goActionVisual(tone:GoListAction["tone"],selected=false,inactive=false,pressed=false){
-  const color=GO_ACTION_PALETTE[tone];
-  return {borderRadius:8,borderWidth:1,borderColor:selected?"rgba(255,255,255,0.38)":"rgba(255,255,255,0.22)",
-    backgroundColor:inactive?color.muted:color.base,shadowColor:"#000000",shadowOffset:{width:0,height:2},
-    shadowOpacity:pressed?0.06:selected?0.22:0.14,shadowRadius:3,elevation:pressed?0:1,
+  return {borderRadius:8,borderWidth:selected?1.5:1,borderColor:selected?"#ffffff":"rgba(255,255,255,0.22)",
+    backgroundColor:GO_ACTION_PALETTE[tone],shadowColor:"#000000",shadowOffset:{width:0,height:2},
+    shadowOpacity:pressed?0.06:selected?0.22:inactive?0.10:0.14,shadowRadius:3,elevation:pressed?0:1,
     opacity:pressed?0.88:1,transform:[{translateY:pressed?1:0}]};
 }
 
@@ -70,7 +69,8 @@ export function GoListActionRow({actions,handedness="right",scale=1,testID="list
         onPress={event=>{event?.stopPropagation?.();action.onPress();}}
         style={{flex:1,flexBasis:0,flexShrink:1,minWidth:0,minHeight:Math.max(44,Math.round(44*scale)),paddingHorizontal:4,paddingVertical:8,
           ...goActionVisual(action.tone,!!action.selected,!!inactive),
-          ...(action.selected?{borderWidth:2,borderColor:"#ffffff"}:{}),alignItems:"center",justifyContent:"center"}}>
+          alignItems:"center",justifyContent:"center"}}>
+        {inactive && (action.tone==="pending"||action.tone==="positive") && <View pointerEvents="none" accessible={false} style={GO_FOLLOW_UP_UNSELECTED_FINISH}/>}
         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.8}
           style={{color:"#FFFFFF",fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",minWidth:0,
             alignSelf:"stretch",width:"100%",...(action.tone==="pending"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{action.label}{action.selected?" ✓":""}</Text>
@@ -114,6 +114,7 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
       style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,...goActionVisual(action.tone,action.key==="discard"?false:selected(action.key),
         action.key!=="discard"&&!!onDone&&!!onPending&&!selected(action.key),pressed===action.key),
         opacity:disabled?0.48:pressed===action.key?0.88:1,alignItems:"center",justifyContent:"center"}}>
+      {action.key!=="discard"&&!!onDone&&!!onPending&&!selected(action.key)&&<View pointerEvents="none" accessible={false} style={GO_FOLLOW_UP_UNSELECTED_FINISH}/>}
       <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2}
         style={{color:"#FFFFFF",fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1,
           ...(action.key==="pending"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{action.text}</Text>

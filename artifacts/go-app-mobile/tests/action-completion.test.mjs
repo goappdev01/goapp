@@ -247,7 +247,7 @@ test("status labels remain legible without an inset PENDIENTE badge",()=>{
    assert.equal(text.props.style.backgroundColor,undefined);
    assert.equal(text.props.style.borderWidth,undefined);
    assert.equal(text.props.style.paddingHorizontal,undefined);
-   assert.equal(text.props.style.textShadowColor,"#3b3000");
+   assert.equal(text.props.style.textShadowColor,"#282828");
    assert.ok(text.props.style.textShadowRadius>=2);
   }else assert.ok(contrast(text.props.style.color,text.props.style.backgroundColor??button.props.style.backgroundColor)>=4.5,label);
  }

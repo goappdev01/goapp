@@ -69,10 +69,11 @@ test('only the explicitly selected personal button has a check and border, witho
  const before=JSON.stringify(base);
  for(const followUp of ['pending','done','pending']){
   const f=card({followUp}),row=nodes(f.tree).find(n=>n.props.testID==='entry-micro-actions'),selected=nodes(row).filter(n=>n.props.accessibilityState?.selected);
-  assert.equal(selected.length,1);assert.equal(text(selected[0]),followUp==='done'?'REALIZADA ✓':'PENDIENTE ✓');assert.equal(selected[0].props.style.borderWidth,2);
+  assert.equal(selected.length,1);assert.equal(text(selected[0]),followUp==='done'?'REALIZADA ✓':'PENDIENTE ✓');assert.equal(selected[0].props.style.borderWidth,1.5);
   const buttons=nodes(row).filter(n=>n.type==='TouchableOpacity'),pending=buttons.find(n=>text(n).startsWith('PENDIENTE')),done=buttons.find(n=>text(n).startsWith('REALIZADA'));
-  assert.equal(pending.props.style.backgroundColor,followUp==='pending'?'#D9AD00':'#8A7400');
-  assert.equal(done.props.style.backgroundColor,followUp==='done'?'#008754':'#145F45');
+  assert.equal(pending.props.style.backgroundColor,'#E8BB2E');
+  assert.equal(done.props.style.backgroundColor,'#008754');
+  assert.ok(nodes(followUp==='pending'?done:pending).some(n=>n.type==='View'&&n.props.style?.borderBottomColor==='rgba(0,0,0,0.13)'));
   assert.equal(nodes(pending).find(n=>n.type==='Text').props.style.color,'#FFFFFF');
   assert.doesNotMatch(text(f.tree),/Seguimiento:/);assert.match(text(f.tree),/CONFIRMADA/);
   selected[0].props.onPress({stopPropagation(){}});assert.equal(f.calls[0][0],followUp==='done'?'done':'pending');

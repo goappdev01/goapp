@@ -5,7 +5,7 @@ import type {useActionCompletion} from "@/hooks/useActionCompletion";
 import type {CompletionEntry} from "@/lib/goActionCompletion";
 import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import {completionKey} from "@/lib/goActionCompletion";
-import {GO_DONE_ACTION_MUTED_GREEN,GO_PENDING_ACTION_MUTED_YELLOW,GO_PENDING_ACTION_YELLOW,GO_PENDING_ACTION_TEXT_SHADOW} from "@/constants/colors";
+import {GO_DONE_ACTION_GREEN,GO_FOLLOW_UP_UNSELECTED_FINISH,GO_PENDING_ACTION_YELLOW,GO_PENDING_ACTION_TEXT_SHADOW} from "@/constants/colors";
 type Model=ReturnType<typeof useActionCompletion>;
 export type CompletionFrame={x:number;y:number;width:number;height:number};
 /** Clear separation from the rendered global outline, independent of text and UI scale. */
@@ -90,11 +90,12 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
     <Text style={{color:"#cbd5e1",fontSize:12,lineHeight:17}}>{entry.dateISO} · {entry.time}{entry.professionalName?" · "+entry.professionalName:""}</Text>
    </ScrollView>
    <View style={{flexDirection:"row",justifyContent:"space-between",gap:decisionGap}}>
-    {([{status:"change",color:"#ef9c5c",background:"#C25300",ink:"#ffffff",es:"PROPONER\nCAMBIO",en:"PROPOSE\nCHANGE"}, {status:"pending",color:"#f2ce6c",background:GO_PENDING_ACTION_YELLOW,ink:"#ffffff",es:"PENDIENTE",en:"PENDING"}, {status:"done",color:"#43b77a",background:"#167346",ink:"#ffffff",es:"REALIZADO",en:"DONE"}] as const).map(action=>{const followUp=model.status?.(entry),selected=action.status!=="change"&&followUp===action.status,inactive=action.status!=="change"&&!!followUp&&!selected;return <TouchableOpacity key={action.status}
+    {([{status:"change",color:"#ef9c5c",background:"#C25300",ink:"#ffffff",es:"PROPONER\nCAMBIO",en:"PROPOSE\nCHANGE"}, {status:"pending",color:"#f2ce6c",background:GO_PENDING_ACTION_YELLOW,ink:"#ffffff",es:"PENDIENTE",en:"PENDING"}, {status:"done",color:"#43b77a",background:GO_DONE_ACTION_GREEN,ink:"#ffffff",es:"REALIZADO",en:"DONE"}] as const).map(action=>{const followUp=model.status?.(entry),selected=action.status!=="change"&&followUp===action.status,inactive=action.status!=="change"&&!selected;return <TouchableOpacity key={action.status}
       accessibilityRole="button" accessibilityLabel={(en?action.en:action.es).replace("\n"," ")} disabled={model.isSaving?.(entry) ?? false}
       onPress={()=>{if(action.status==="change"){setExpanded(false);onPropose(entry);}else void model.decide(entry,action.status);}}
-      style={{width:side,height:decisionHeight,minWidth:44,minHeight:44,borderRadius:14,borderWidth:selected?2:1,borderColor:selected?"#ffffff":action.color,
-       backgroundColor:inactive?(action.status==="pending"?GO_PENDING_ACTION_MUTED_YELLOW:GO_DONE_ACTION_MUTED_GREEN):action.background,alignItems:"center",justifyContent:"center",padding:4,opacity:model.isSaving?.(entry)?0.45:1}}>
+      style={{width:side,height:decisionHeight,minWidth:44,minHeight:44,borderRadius:14,borderWidth:selected?1.5:1,borderColor:selected?"#ffffff":action.color,
+       backgroundColor:action.background,alignItems:"center",justifyContent:"center",padding:4,opacity:model.isSaving?.(entry)?0.45:1}}>
+      {inactive&&<View pointerEvents="none" accessible={false} style={{...GO_FOLLOW_UP_UNSELECTED_FINISH,borderRadius:13}}/>}
       <Text numberOfLines={action.status==="change"?2:1} adjustsFontSizeToFit minimumFontScale={0.85} style={{width:"100%",maxWidth:"100%",color:action.ink,fontSize:12,fontWeight:"700",textAlign:"center",...(action.status==="pending"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{en?action.en:action.es}</Text>
      </TouchableOpacity>})}
    </View>
