@@ -50,6 +50,7 @@ export function flushGoLog(): Promise<void> {
 export function updateGoLog<T>(
   update: (entries: GoEntry[]) => { entries: GoEntry[]; result: T } | Promise<{ entries: GoEntry[]; result: T }>,
   assertActive?: () => void,
+  beforeCommit?: (next: GoEntry[], previous: GoEntry[]) => Promise<void>,
 ): Promise<T> {
   return enqueue(async () => {
     assertActive?.();
@@ -84,6 +85,8 @@ export function updateGoLog<T>(
     if (await getTaskUser() !== owner) throw new Error("La cuenta ha cambiado. Vuelve a solicitar la acción.");
     assertActive?.();
     if (!equal(next.entries, snapshot)) {
+      await beforeCommit?.(next.entries, snapshot);
+      assertActive?.();
       await AsyncStorage.setItem(GO_LOG_KEY, JSON.stringify(next.entries));
       // Notify Landing only after storage acknowledges the write.
       publish(next.entries);

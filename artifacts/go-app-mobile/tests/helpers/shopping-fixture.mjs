@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';import {createRequire} from 'node:module
 const require=createRequire(import.meta.url),h=require('./unified-note-fixture.cjs');
 export async function shoppingFixture(){
  const disk=await h.diskFixture(),model=h.load('lib/shoppingNote.ts');
- const api=()=>h.load('lib/shoppingNoteStore.ts',{'@react-native-async-storage/async-storage':disk.storage,'./goTaskAccess':disk.access,'./goLogStore':disk.store,'./unifiedNotes':disk.model,'./shoppingNote':model});
+ const localSync={syncShopping:async()=>{},updateShoppingLog:(_scope,active,update)=>disk.store.updateGoLog(update,()=>{if(!active())throw Error('El contexto de compra ha cambiado.');}),
+  selectShoppingList:async(scope,_active,id)=>{const key='shopping_note:'+encodeURIComponent(scope.userId)+':'+encodeURIComponent(scope.context)+':active_list';if(id)await disk.storage.setItem(key,id);else await disk.storage.removeItem(key);}};
+ const api=()=>h.load('lib/shoppingNoteStore.ts',{'@react-native-async-storage/async-storage':disk.storage,'./goTaskAccess':disk.access,'./goLogStore':disk.store,'./unifiedNotes':disk.model,'./shoppingNote':model,'./shoppingSync':localSync});
  const open=(scope=disk.scope,active=disk.active)=>api().openShoppingNote(scope,active);
  const run=(op,scope=disk.scope,active=disk.active)=>api().runShoppingOperation(scope,active,{operationId:model.shoppingId(),...op});
  const doc=()=>disk.rows.find(row=>row.ownerUserId===disk.scope.userId&&row.note?.shopping)?.note.shopping;
