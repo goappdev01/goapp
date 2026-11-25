@@ -3,7 +3,7 @@ import {shoppingFixture,shoppingUI} from './helpers/shopping-fixture.mjs';
 const require=createRequire(import.meta.url),h=require('./helpers/unified-note-fixture.cjs'),layout=h.load('lib/shoppingScreenLayout.ts');
 const flat=value=>Object.assign({},...(Array.isArray(value)?value.filter(Boolean):[value]));
 
-for(const handedness of ['left','right'])for(const width of [320,390,430])test(`Landing ${width} ${handedness}: two full-width rows without an in-flow floating column`,async()=>{
+for(const handedness of ['left','right'])for(const width of [320,390,430])test(`Landing ${width} ${handedness}: search reserves its handed floating column`,async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false,width,fontScale:width===320?1.8:1.4,handedness});
   assert.equal(ui.hosts.has('shopping-navigation-space'),false);assert.equal(ui.hosts.get('shopping-dock-content').style,undefined);
@@ -12,9 +12,11 @@ for(const handedness of ['left','right'])for(const width of [320,390,430])test(`
   const ids=h.React.Children.toArray(actions.children).map(node=>node.props.testID).filter(Boolean);assert.deepEqual(ids,['shopping-manage-lists','shopping-list']);assert.equal(ui.hosts.has('shopping-go'),false);
   for(const id of ['shopping-manage-lists','shopping-list']){const s=flat(ui.hosts.get(id).style);assert.equal(s.flex,1);assert.ok(s.minHeight>=44);assert.equal(s.minWidth,44);}
   assert.equal(flat(ui.hosts.get('shopping-shortcut-row').style).flexWrap,'nowrap');assert.equal(ui.hosts.get('shopping-search-open').style[0].fontSize,undefined);
+  assert.equal(flat(ui.hosts.get('shopping-navigation-row').style).flexDirection,handedness==='left'?'row-reverse':'row');
+  assert.equal(ui.hosts.get('shopping-search-navigation-clearance').style.width,56);
   assert.equal(ui.hosts.get('shopping-navigation-frame').width,56);assert.equal(ui.hosts.get('shopping-navigation-frame').height,120);assert.equal(ui.hosts.get('shopping-floating-buttons').style.flexDirection,'column');
   assert.equal(ui.hosts.get('shopping-navigation-frame').allowUserOverlap,false);
-  await ui.run(()=>ui.hosts.get('shopping-thumb-controls').onLayout({nativeEvent:{layout:{height:124}}}));assert.equal(ui.hosts.get('shopping-navigation-frame').initialBottom,132);
+  await ui.run(()=>ui.hosts.get('shopping-thumb-controls').onLayout({nativeEvent:{layout:{height:124}}}));assert.equal(ui.hosts.get('shopping-navigation-frame').initialBottom,70);
   await ui.tap('shopping-go-orbit-hit');assert.ok(ui.hosts.has('shopping-command'));assert.equal(ui.hosts.get('shopping-navigation-frame').allowUserOverlap,false);await ui.tap('shopping-back');
   await ui.tap('shopping-orbit-home');assert.ok(ui.hosts.has('shopping-products-scroll'));await ui.tap('shopping-back');
   await ui.tap('shopping-search-open');assert.ok(ui.hosts.has('shopping-product-search'));await ui.tap('shopping-back');

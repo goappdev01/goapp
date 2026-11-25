@@ -12,7 +12,11 @@ test('shortcut reflow uses measured full labels and whole words, without shrinki
 for(const hand of ['left','right'])test(`Landing ${hand}: vertical existing navigator shares the lower dock; measured labels retain complete words`,async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false,handedness:hand,width:390,fontScale:1.4});
-  const nav=ui.hosts.get('shopping-navigation-frame');assert.equal(nav.width,56);assert.equal(nav.height,120);assert.equal(nav.initialBottom,132);assert.equal(nav.handedness,hand);
+  const nav=ui.hosts.get('shopping-navigation-frame');assert.equal(nav.width,56);assert.equal(nav.height,120);assert.equal(nav.initialBottom,70);assert.equal(nav.handedness,hand);
+  assert.equal(ui.hosts.get('shopping-navigation-row').style[1].flexDirection,hand==='left'?'row-reverse':'row');
+  assert.equal(ui.hosts.get('shopping-search-navigation-clearance').style.width,56);
+  await ui.run(()=>{ui.hosts.get('shopping-shortcut-row').onLayout({nativeEvent:{layout:{height:60}}});ui.hosts.get('shopping-thumb-controls').onLayout({nativeEvent:{layout:{height:140}}});});
+  assert.equal(ui.hosts.get('shopping-navigation-frame').initialBottom,78,'Close stays centred on the measured search row');
   assert.equal(ui.hosts.get('shopping-floating-buttons').style.flexDirection,'column');
   assert.equal(style(ui.hosts.get('shopping-thumb-controls').style).flexDirection,undefined);
   assert.equal(ui.hosts.get('shopping-navigation-row').style[1].minHeight,0,'no extra row elevates the orbits to make room for navigation');
@@ -24,12 +28,13 @@ for(const hand of ['left','right'])test(`Landing ${hand}: vertical existing navi
  }finally{await ui?.close();f.disk.close();}
 });
 
-test('narrow iPhone keeps one full-width search shortcut above the three fixed actions',async()=>{
+test('narrow iPhone keeps the search shortcut readable beside the floating close target',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false,width:320,fontScale:1.8});
   await ui.run(()=>{for(const [key,width] of Object.entries({search:210,lists:120,searchWord:120,listWord:60}))ui.hosts.get('shopping-label-measure-'+key).onTextLayout({nativeEvent:{lines:[{width}]}});});
-  assert.equal(style(ui.hosts.get('shopping-shortcut-row').style).flexDirection,'row');assert.equal(style(ui.hosts.get('shopping-search-open').style).flexDirection,'row');
+  assert.equal(style(ui.hosts.get('shopping-shortcut-row').style).flexDirection,'row');assert.equal(style(ui.hosts.get('shopping-search-open').style).flexDirection,'column');
   assert.equal(ui.hosts.get('shopping-search-label').children,'Buscar productos');assert.ok(style(ui.hosts.get('shopping-search-open').style).minHeight>=44);
+  assert.equal(ui.hosts.get('shopping-search-navigation-clearance').style.width,56);
  }finally{await ui?.close();f.disk.close();}
 });
 

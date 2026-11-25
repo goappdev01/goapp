@@ -28,8 +28,10 @@ export function landingShoppingPreferred(list: ShoppingRect, reunion: ShoppingRe
   const listRadius = list.width / 2, foodRadius = food.width / 2, cartRadius = size / 2;
   const edgeGap = (other: ShoppingRect, point: { x: number; y: number }) =>
     Math.hypot(point.x - a.x, point.y - a.y) - listRadius - other.width / 2;
-  const gap = Math.max(2, (Math.max(0, edgeGap(reunion, c)) + Math.max(0, edgeGap(food, b))) / 2);
-  const first = listRadius + cartRadius + gap, second = foodRadius + cartRadius + gap;
+  // The frozen orbits can be almost tangent. Keep the minimum touch clearance,
+  // otherwise reproduce each measured edge gap independently.
+  const first = listRadius + cartRadius + Math.max(2, edgeGap(reunion, c));
+  const second = foodRadius + cartRadius + Math.max(2, edgeGap(food, b));
   const dx = b.x - a.x, dy = b.y - a.y, distance = Math.hypot(dx, dy);
   if (!distance) return { x: a.x + (mirrored ? -first : first) - cartRadius,
     y: a.y - cartRadius, width: size, height: size };
@@ -50,9 +52,16 @@ export function fitLandingShoppingShortcut(preferred: ShoppingRect,
   const gap = 2, size = preferred.width;
   const within = (r: ShoppingRect) => r.x >= bounds.left && r.x + size <= bounds.right
     && r.y >= bounds.top && r.y + size <= bounds.bottom;
-  const clear = (r: ShoppingRect) => within(r) && obstacles.every(o =>
-    r.x + size + gap <= o.x || o.x + o.width + gap <= r.x
-    || r.y + size + gap <= o.y || o.y + o.height + gap <= r.y);
+  const clear = (r: ShoppingRect) => within(r) && obstacles.every(o => {
+    // Orbit hit targets are circles. Their bounding squares overlap at the
+    // correct tangent position and used to push the cart away from COMIDA.
+    const orbitKey = "key" in o ? String(o.key) : "";
+    if (orbitKey === "list" || orbitKey.startsWith("orbit-"))
+      return Math.hypot(r.x + size / 2 - o.x - o.width / 2,
+        r.y + size / 2 - o.y - o.height / 2) >= size / 2 + o.width / 2 + gap - 0.001;
+    return r.x + size + gap <= o.x || o.x + o.width + gap <= r.x
+      || r.y + size + gap <= o.y || o.y + o.height + gap <= r.y;
+  });
   if (clear(preferred)) return preferred;
   const xs = [preferred.x, bounds.left, bounds.right - size,
     ...obstacles.flatMap(o => [o.x - size - gap, o.x + o.width + gap])];

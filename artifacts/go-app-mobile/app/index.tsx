@@ -14149,9 +14149,7 @@ function HomeScreenContent() {
       ? fitLandingShoppingShortcut(landingShoppingPreferred(list, reunion, food, cartSize, compactLandingGeometry.mirrored),
         compactLandingGeometry.bounds, obstacles, list, food) : null;
     const cornerFits = cartCorner && cartCorner.x >= bounds.x && cartCorner.y >= bounds.y
-      && cartCorner.x + cartSize <= bounds.x + bounds.width && cartCorner.y + cartSize <= bounds.y + bounds.height
-      && obstacles.every(rect => cartCorner.x + cartSize + 2 <= rect.x || rect.x + rect.width + 2 <= cartCorner.x
-        || cartCorner.y + cartSize + 2 <= rect.y || rect.y + rect.height + 2 <= cartCorner.y);
+      && cartCorner.x + cartSize <= bounds.x + bounds.width && cartCorner.y + cartSize <= bounds.y + bounds.height;
     const closeObstacles = cornerFits ? [...obstacles, cartCorner] : obstacles;
     const normal = placeLandingClose(preferred, bounds, closeObstacles, compactLandingActive ? 0 : 8);
     if (normal) return normal;

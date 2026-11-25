@@ -233,14 +233,13 @@ export function DraggableFAB({
         })
         .onEnd(() => {
           "worklet";
-          if(navigation)runOnJS(savePos)(posL.value,posT.value);
           if(avoidRects?.length&&!(navigation&&allowUserOverlap)){
             const target=settleClearPosition(posL.value,posT.value,originL.value,originT.value,
               buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects);
             posL.value=withSpring(target.x);
             posT.value=withSpring(target.y);
-            if(!navigation)runOnJS(savePos)(target.x,target.y);
-          }else if(!navigation)runOnJS(savePos)(posL.value,posT.value);
+            runOnJS(savePos)(target.x,target.y);
+          }else runOnJS(savePos)(posL.value,posT.value);
           isDragging.value = false;
           scale.value = withSpring(1, { damping: 14, stiffness: 160 });
           shadowOp.value = 0.18;
