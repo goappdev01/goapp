@@ -14120,10 +14120,25 @@ function HomeScreenContent() {
     const bounds = { x: insets.left, y: insets.top, width: screen.width-insets.left-insets.right, height: screen.height-insets.top-insets.bottom };
     const preferred = { ...landingDisplayCloseRect, x: handedness === "right" ? landingDisplayCloseRect.x-24 : landingDisplayCloseRect.x, y: landingDisplayCloseRect.y-24, width: 64, height: 64 };
     const obstacles = [...(compactLandingActive?[...compactLandingGeometry.obstacles,...compactLandingGeometry.fixedObstacles]:landingOrbitObstacles),...closeHeaderObstacles,...closeReservedColumn,...(compactLandingActive?[compactLandingGeometry.help]:landingContentGeometry?[{...landingContentGeometry.help,y:landingContentGeometry.help.y+landingOffsetY}]:[])];
-    const normal = placeLandingClose(preferred, bounds, obstacles, compactLandingActive ? 0 : 8);
+    // On narrow screens the close target can occupy the only corner between LIST and COMIDA.
+    // Reserve that corner when it is otherwise clear, moving only the close target if needed.
+    const list = compactLandingGeometry.obstacles.find(rect => rect.key === "list");
+    const food = compactLandingGeometry.obstacles.find(rect => rect.key === "orbit-1");
+    const cartSize = shoppingShortcut.touchSize;
+    const cartCorner = shoppingShortcutVisible && compactLandingGeometry.fitted && list && food ? {
+      x: compactLandingGeometry.center.x + (compactLandingGeometry.mirrored ? -shoppingShortcut.x : shoppingShortcut.x) - cartSize / 2,
+      y: compactLandingGeometry.center.y + shoppingShortcut.y - cartSize / 2,
+      width: cartSize, height: cartSize,
+    } : null;
+    const cornerFits = cartCorner && cartCorner.x >= bounds.x && cartCorner.y >= bounds.y
+      && cartCorner.x + cartSize <= bounds.x + bounds.width && cartCorner.y + cartSize <= bounds.y + bounds.height
+      && obstacles.every(rect => cartCorner.x + cartSize + 2 <= rect.x || rect.x + rect.width + 2 <= cartCorner.x
+        || cartCorner.y + cartSize + 2 <= rect.y || rect.y + rect.height + 2 <= cartCorner.y);
+    const closeObstacles = cornerFits ? [...obstacles, cartCorner] : obstacles;
+    const normal = placeLandingClose(preferred, bounds, closeObstacles, compactLandingActive ? 0 : 8);
     if (normal) return normal;
     if (compactLandingActive) {
-      const small = placeLandingClose({ ...preferred, x: preferred.x+10, y: preferred.y+10, width: 44, height: 44 }, bounds, obstacles, 0);
+      const small = placeLandingClose({ ...preferred, x: preferred.x+10, y: preferred.y+10, width: 44, height: 44 }, bounds, closeObstacles, 0);
       if (small) return small;
     }
     return { ...preferred, x: Math.max(insets.left,Math.min(screen.width-insets.right-64,landingDisplayCloseRect.x)), y:Math.max(insets.top,Math.min(screen.height-insets.bottom-64,landingDisplayCloseRect.y)) };

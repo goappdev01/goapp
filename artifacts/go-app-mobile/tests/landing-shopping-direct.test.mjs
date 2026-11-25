@@ -10,7 +10,7 @@ const { fixture, devices } = require('./helpers/landing-qr-fixture.cjs');
 const separated = (a, b, gap = 3.9) => a.x + a.width + gap <= b.x || b.x + b.width + gap <= a.x
   || a.y + a.height + gap <= b.y || b.y + b.height + gap <= a.y;
 
-test('the cart sits between LIST and FOOD without moving any existing orbit or floating control', () => {
+test('the cart sits between LIST and FOOD; only a blocking close target may move', () => {
   for (const device of devices)
     for (const preset of ['compacto', 'estandar', 'grande'])
       for (const profile of ['ADMIN', 'USER'])
@@ -23,7 +23,6 @@ test('the cart sits between LIST and FOOD without moving any existing orbit or f
           assert.equal(hidden.landingShoppingRect, null);
           assert.equal(JSON.stringify(geometry.obstacles), JSON.stringify(hidden.compactLandingGeometry.obstacles));
           assert.equal(JSON.stringify(geometry.center), JSON.stringify(hidden.compactLandingGeometry.center));
-          assert.equal(JSON.stringify(f.landingNavigationCloseRect), JSON.stringify(hidden.landingNavigationCloseRect));
           assert.ok(cart.width >= 44 && cart.height >= 44);
           assert.ok(cart.x >= geometry.bounds.left - .01 && cart.x + cart.width <= geometry.bounds.right + .01);
           assert.ok(cart.y >= geometry.bounds.top - .01 && cart.y + cart.height <= geometry.bounds.bottom + .01);
@@ -39,13 +38,23 @@ test('the cart sits between LIST and FOOD without moving any existing orbit or f
           const ideal = { x: geometry.center.x + (geometry.mirrored ? -shortcut.x : shortcut.x) - shortcut.touchSize / 2,
             y: geometry.center.y + shortcut.y - shortcut.touchSize / 2,
             width: shortcut.touchSize, height: shortcut.touchSize };
-          if (Math.abs(cart.x - ideal.x) < .01 && Math.abs(cart.y - ideal.y) < .01) {
-            const listGap = geometry.mirrored
-              ? list.x - cart.x - cart.width : cart.x - list.x - list.width;
-            const foodGap = food.y - cart.y - cart.height;
-            assert.ok(Math.abs(listGap - 6) < .01 && Math.abs(foodGap - 6) < .01,
-              `equal touch gaps beside LIST and above FOOD ${device.width} ${preset} ${hand}`);
+          const close = f.landingNavigationCloseRect;
+          const oldClose = hidden.landingNavigationCloseRect;
+          assert.equal(close.width, oldClose.width);
+          assert.equal(close.height, oldClose.height);
+          for (const other of [...geometry.obstacles, ...geometry.fixedObstacles, geometry.help])
+            assert.ok(separated(close, other, 0), `close target ${device.width} ${preset} ${hand}`);
+          if (close.x !== oldClose.x || close.y !== oldClose.y) {
+            assert.ok(!separated(ideal, oldClose, 2), 'close moves only when it blocks the cart corner');
+            assert.ok(separated(ideal, close, 2), 'close frees the cart corner');
           }
+          assert.ok(Math.abs(cart.x - ideal.x) < .01 && Math.abs(cart.y - ideal.y) < .01,
+            `cart stays in the corner ${device.width} ${preset} ${hand}`);
+          const listGap = geometry.mirrored
+            ? list.x - cart.x - cart.width : cart.x - list.x - list.width;
+          const foodGap = food.y - cart.y - cart.height;
+          assert.ok(Math.abs(listGap - 6) < .01 && Math.abs(foodGap - 6) < .01,
+            `equal touch gaps beside LIST and above FOOD ${device.width} ${preset} ${hand}`);
         }
 });
 
