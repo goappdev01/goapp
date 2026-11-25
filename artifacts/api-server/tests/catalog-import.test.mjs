@@ -30,6 +30,7 @@ test('public catalog extraction requires real named price rows and preserves mis
       [{ name: 'Retoque de raíz', price: 32, duration: 70, description: '' }]);
     assert.deepEqual(source.extractCatalogHtml('<p>Ensaladilla · 12,90 € · Alérgenos: 3, 4.</p>'),
       [{ name: 'Ensaladilla', price: 12.9, duration: null, description: 'Alérgenos 3, 4.' }]);
+    assert.equal(source.extractCatalogHtml(Array.from({length:45},(_,i)=>`<li>Plato ${i+1} · 8 €</li>`).join('')).length,41);
     for (const url of ['http://example.com', 'https://127.0.0.1/menu',
       'https://user:pass@example.com/menu', 'https://example.local/menu',
       'https://example.com:8443/menu']) {

@@ -114,7 +114,8 @@ export function extractCatalogHtml(html: string): ImportedService[] {
     const key = name.toLocaleLowerCase("es"); if (seen.has(key)) continue;
     seen.add(key);
     results.push({ name, price: amount, duration: minutes, description });
-    if (results.length === 40) break;
+    // Keep one extra result so the API can reject oversized menus explicitly.
+    if (results.length === 41) break;
   }
   return results;
 }

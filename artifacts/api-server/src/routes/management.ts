@@ -120,6 +120,7 @@ router.post("/businesses/:businessId/catalog-import/extract", async (req, res) =
     const html = await fetchPublicCatalog(body.url);
     const services = extractCatalogHtml(html);
     if (!services.length) { res.status(422).json({ code: "CATALOG_NO_PRICED_ROWS", error: "No se encontraron servicios con nombre y precio explícitos. No se importó nada." }); return; }
+    if (services.length > 40) { res.status(422).json({ code: "CATALOG_TOO_MANY_ROWS", error: "La página contiene más de 40 entradas. Usa el enlace de una categoría de la carta para revisar la importación completa." }); return; }
     res.json({ ok: true, services });
   } catch (error) {
     const known = error instanceof CatalogImportError ? error : null;
