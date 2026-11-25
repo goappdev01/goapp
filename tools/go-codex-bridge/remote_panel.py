@@ -51,6 +51,8 @@ class RemotePanel:
         self.device_probes=DeviceProbes(bridge,self.config)
         self.orbit_system_cache=None
         self.account_login=None
+        from factory_schedule import FactorySchedule
+        self.schedule=FactorySchedule(self)
 
     def orbit_owner(self):
         owner=self.config.get("owner_hash", "")
@@ -197,6 +199,10 @@ class RemotePanel:
     def orbit_control(self,action,body,principal):
         if action=="change-account" and not body:
             return self.change_account()
+        if action=="schedule" and set(body)=={"due_utc","confirmation"}:
+            return self.schedule.set(body["due_utc"],body["confirmation"],principal)
+        if action=="cancel-schedule" and set(body)=={"confirmation"}:
+            return self.schedule.cancel(body["confirmation"])
         if action=="team" and set(body)=={"team"}:
             from factory_reservation import ReservationError
             try:
@@ -217,6 +223,7 @@ class RemotePanel:
             if not body["enabled"]:
                 if self.w.enabled():
                     self.w.pause("OWNER_PAUSED")
+                self.schedule.cancel_on_pause()
                 return {"enabled":False,"reason":self.w.status()["reason"]}
             if self.w.enabled():
                 return {"enabled":True,"reason":self.w.status()["reason"]}
@@ -249,6 +256,7 @@ class RemotePanel:
             if body!={"confirmation":word}:
                 self.w.fail("REMOTE_CONFIRMATION_REQUIRED","Confirma la operación exacta.")
             self.w.pause("OWNER_PAUSED" if action=="pause" else "OWNER_STOPPED")
+            self.schedule.cancel_on_pause()
             return {"enabled":False,"reason":"OWNER_PAUSED" if action=="pause" else "OWNER_STOPPED"}
         self.w.fail("ORBIT_V2_ACTION_INVALID","La operación no está disponible en V2.")
 
@@ -455,6 +463,7 @@ class RemotePanel:
         return {"version":__import__("puente").EXECUTOR_VERSION,"source_sha256":getattr(self.b,'loaded_code_sha256',None),"updated":self.f.utc(),
                 "wheel":wheel_view,
                 "reservation":self.f.reservation.status(),
+                "activation_schedule":self.schedule.status(),
                 "cards":cards,"questions":pending,"quota":self.b.quota_status(),
                 "expo":expo,"expo_launches":launches,"device_diagnostics":device_diagnostics,"chat":{"state":"PENDIENTE DE COMPROBACIÓN REAL",
                 "note":"Las pruebas alojadas requieren dos sesiones de prueba autorizadas. La versión Expo comparte el backend existente."}}
@@ -596,9 +605,11 @@ class RemotePanel:
             result=self.device_probes.launch(body,principal,peer,agent)
         elif path=="/remote/pause" and not body:
             self.w.pause("OWNER_PAUSED")
+            self.schedule.cancel_on_pause()
             result={"paused":True}
         elif path=="/remote/stop" and not body:
             self.w.pause("OWNER_STOPPED")
+            self.schedule.cancel_on_pause()
             result={"stopped":True}
         elif path=="/remote/preview" and set(body)=={"action","payload"} and isinstance(body["payload"],dict):
             result=self.preview(body["action"],body["payload"],principal)
@@ -612,7 +623,7 @@ class RemotePanel:
             result=self.orbit_move(body)
         elif path=="/remote/v2/configure":
             result=self.orbit_configure(body)
-        elif path in ("/remote/v2/power","/remote/v2/team","/remote/v2/reconcile-reservation","/remote/v2/preview","/remote/v2/decide","/remote/v2/pause","/remote/v2/stop",
+        elif path in ("/remote/v2/power","/remote/v2/team","/remote/v2/reconcile-reservation","/remote/v2/schedule","/remote/v2/cancel-schedule","/remote/v2/preview","/remote/v2/decide","/remote/v2/pause","/remote/v2/stop",
                       "/remote/v2/change-account"):
             result=self.orbit_control(path.rsplit('/',1)[-1],body,principal)
         else:self.w.fail("REMOTE_ACTION_INVALID","La operación no está admitida.")

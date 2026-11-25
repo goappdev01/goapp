@@ -3,6 +3,7 @@ const $=id=>document.getElementById(id), remote=location.pathname==='/remote'||l
 const legacy=remote?'/remote/legacy':'/legacy';
 let state=null,orbitIndex=0,selected='factory',drag=null,hold=null,pending=null,requestId=0,powerBusy=false;
 let accountReview=null, accountBusy=false, accountView=null, accountRequestId=0;
+let scheduleDraft='';
 const metroProof={};
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
 function note(text){$('notice').textContent=text;}
@@ -123,8 +124,39 @@ function renderTeamSelection(box,op){
     box.append(reconcile);
   }
 }
+function renderSchedule(box,op){
+  const schedule=op.activation_schedule||{state:'none'};
+  const section=node('section',undefined,'module-line');
+  section.append(node('h3','Activación'));
+  const activate=node('button','Activar ahora');
+  activate.type='button';activate.disabled=Boolean(op.wheel.enabled||powerBusy);
+  activate.onclick=()=>factoryPower();section.append(activate);
+  const descriptions={none:'Sin activación programada.',scheduled:'Activación programada',firing:'Comprobando activación',completed:'Activación completada',failed:'No se activó',cancelled:'Programación cancelada'};
+  line(section,descriptions[schedule.state]||'Estado no verificado',schedule.state==='failed'?'status bad':'status');
+  if(schedule.due_utc)line(section,(schedule.state==='scheduled'?'Próximo arranque: ':'Hora programada: ')+new Date(schedule.due_utc).toLocaleString(), 'muted');
+  if(schedule.reason)line(section,'Motivo: '+schedule.reason,'status bad');
+  const label=node('label','Programar activación · fecha y hora local');
+  const input=node('input');input.type='datetime-local';input.value=scheduleDraft;
+  input.oninput=()=>{scheduleDraft=input.value;};label.append(input);section.append(label);
+  const submit=node('button','Programar activación');submit.type='button';
+  submit.disabled=Boolean(op.wheel.enabled||schedule.state==='scheduled'||schedule.state==='firing');
+  submit.onclick=async()=>{
+    const date=new Date(input.value);
+    if(!input.value||Number.isNaN(date.getTime())||date.getFullYear()!==Number(input.value.slice(0,4))||date.getMonth()+1!==Number(input.value.slice(5,7))||date.getDate()!==Number(input.value.slice(8,10))||date.getHours()!==Number(input.value.slice(11,13))||date.getMinutes()!==Number(input.value.slice(14,16))){note('Selecciona una fecha y hora local válida.');return;}
+    if(!window.confirm('Programar ACTIVAR para '+date.toLocaleString()+'? El puente comprobará cuenta, cuota y permisos al llegar la hora.'))return;
+    submit.disabled=true;
+    try{await api('schedule',{due_utc:date.toISOString(),confirmation:'PROGRAMAR ACTIVACIÓN'});scheduleDraft='';await refresh();note('Activación programada. La fábrica continúa pausada.');}
+    catch(e){note(e.message);submit.disabled=false;}
+  };section.append(submit);
+  if(schedule.state==='scheduled'){
+    const cancel=node('button','Cancelar activación programada');cancel.type='button';
+    cancel.onclick=async()=>{if(!window.confirm('¿Cancelar esta activación programada?'))return;cancel.disabled=true;try{await api('cancel-schedule',{confirmation:'CANCELAR ACTIVACIÓN'});await refresh();note('Programación cancelada.');}catch(e){note(e.message);cancel.disabled=false;}};
+    section.append(cancel);
+  }
+  box.append(section);
+}
 function renderPanel(){const key=selected,box=$('panelContent'),op=state.operational;box.replaceChildren();$('panelTitle').textContent=actualModule(key);$('v1Link').href=legacy;$('v1Link').textContent='Abrir controles existentes';
-  if(key==='factory'){const mode=factoryMode(op);renderTeamSelection(box,op);line(box,'Estado real: '+mode[1],mode[0]==='programming'?'status good':mode[0]==='blocked'?'status bad':'status warn');line(box,'Trabajo actual: '+(op.wheel.current||'ninguno'));line(box,'Siguiente según la última COLA verificada: '+(op.wheel.next||'ninguno'));if(op.wheel.next_action)line(box,'Motivo: '+op.wheel.next_action,'muted');for(const skipped of (op.wheel.skipped||[]).slice(0,6))line(box,'Omitida: '+skipped.title+' · '+skipped.reason+' · permanece en COLA','muted');line(box,op.wheel.button?.reason_message||'Sin bloqueo global registrado.');}
+  if(key==='factory'){const mode=factoryMode(op);renderTeamSelection(box,op);renderSchedule(box,op);line(box,'Estado real: '+mode[1],mode[0]==='programming'?'status good':mode[0]==='blocked'?'status bad':'status warn');line(box,'Trabajo actual: '+(op.wheel.current||'ninguno'));line(box,'Siguiente según la última COLA verificada: '+(op.wheel.next||'ninguno'));if(op.wheel.next_action)line(box,'Motivo: '+op.wheel.next_action,'muted');for(const skipped of (op.wheel.skipped||[]).slice(0,6))line(box,'Omitida: '+skipped.title+' · '+skipped.reason+' · permanece en COLA','muted');line(box,op.wheel.button?.reason_message||'Sin bloqueo global registrado.');}
   else if(key==='expo'){const launches=op.expo_launches||{};for(const [id,port,label] of [['main',8088,'COLA TERMINADA'],['owner',8089,'COMPROBACIONES']]){const item=launches.links?.[id],section=node('section',undefined,'module-line');section.append(node('h3',label+' · '+port));const fresh=Date.now()<Number(launches.expires_at||0)*1000,available=Boolean(item?.available&&fresh),proof=metroProof[port],proofFresh=available&&proof&&Date.now()-proof.checked_at*1000<90000&&(port!==8089||proof.expected_sha===op.expo?.sha);line(section,available?'TCP, manifiesto, bundle y recursos: verificados desde Windows.':'Servicio sin verificación vigente.',available?'status good':'status bad');line(section,'Versión esperada: '+(port===8089?op.expo?.sha||'sin configurar':proofFresh?proof.expected_sha:'MAIN publicado; comprobar SHA'));line(section,'Versión realmente servida: '+(proofFresh?proof.served_sha:'SHA sin verificación vigente.'));line(section,'Último diagnóstico: '+(launches.checked_at?new Date(launches.checked_at*1000).toLocaleString():'pendiente'));const verify=node('button','Comprobar código servido');verify.onclick=async()=>{verify.disabled=true;try{metroProof[port]=await api('verify/'+port);note('El código de '+port+' coincide con el SHA indicado. La apertura en iPhone sigue pendiente.');renderPanel();}catch(e){delete metroProof[port];note('No se verificó '+port+': '+e.message);renderPanel();}};section.append(verify);const link=node('a','ABRIR '+label+' · '+port,'action');link.setAttribute('aria-disabled',String(!available));if(available&&item?.url&&new URL(item.url).port===String(port))link.href=item.url;section.append(link);box.append(section);}line(box,'La descarga desde Windows no acredita que GO haya abierto en iPhone. Usa el diagnóstico Safari del panel V1.','muted');}
   else if(key==='agents'){line(box,'Cuenta y cuota del ejecutor: '+(op.quota?.state||'sin verificar'));line(box,'Trabajo Codex: '+(op.cards?.find(c=>c.state==='working')?.activity?.state||'ninguno'));}
   else if(key==='trello'||key==='reviews'){for(const c of op.cards||[])line(box,`${c.title} · ${c.state} · fase ${c.phase}`);if(!op.cards?.length)line(box,'No hay lote verificado en esta vista.');}

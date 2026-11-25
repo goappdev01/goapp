@@ -1577,7 +1577,7 @@ def server(bridge, open_browser=True):
                     result = remote.orbit_move(body)
                 elif path == "/v2/configure":
                     result = remote.orbit_configure(body)
-                elif path in ("/v2/power","/v2/team","/v2/reconcile-reservation","/v2/preview","/v2/decide","/v2/pause","/v2/stop","/v2/change-account"):
+                elif path in ("/v2/power","/v2/team","/v2/reconcile-reservation","/v2/schedule","/v2/cancel-schedule","/v2/preview","/v2/decide","/v2/pause","/v2/stop","/v2/change-account"):
                     result = remote.orbit_control(path.rsplit('/',1)[-1],body,"local:"+remote.orbit_owner())
                 elif path == "/api/wheel/approve" and set(body) == {"decisions", "start_frozen_batch"}:
                     result = bridge.factory.wheel.approve(body["decisions"], start_frozen_batch=body["start_frozen_batch"])
@@ -1693,6 +1693,20 @@ def server(bridge, open_browser=True):
     stop_factory = threading.Event()
     factory_thread=threading.Thread(target=bridge.factory.loop, args=(stop_factory,), daemon=True)
     factory_thread.start()
+    stop_schedule = threading.Event()
+    def poll_schedule():
+        while not stop_schedule.wait(5):
+            try:
+                remote.schedule.tick()
+            except Exception as error:
+                # A malformed or unavailable state must not start production.
+                # Keep this thread alive so a later owner repair can be observed.
+                code=getattr(error,"code","FACTORY_SCHEDULE_POLL_FAILED")
+                if code!=getattr(poll_schedule,"last_error",None):
+                    bridge.audit("factory_activation_schedule_poll_failed",{"reason":code})
+                    poll_schedule.last_error=code
+    schedule_thread=threading.Thread(target=poll_schedule,daemon=True)
+    schedule_thread.start()
     stop_owner_expo = threading.Event()
     def poll_owner_expo():
         last_error = None
@@ -1716,9 +1730,11 @@ def server(bridge, open_browser=True):
     finally:
         stop_receiver.set()
         stop_factory.set()
+        stop_schedule.set()
         stop_owner_expo.set()
         receiver_thread.join()
         factory_thread.join()
+        schedule_thread.join()
         owner_expo_thread.join()
         httpd.server_close()
     return getattr(httpd,"restart_requested",False)

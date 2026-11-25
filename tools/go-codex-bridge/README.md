@@ -118,6 +118,24 @@ y consentimiento específico de escritura. Sigue pendiente hasta ejecutarla.
 
 ## Pruebas y despliegue
 
+La órbita Fábrica de V2 permite «Activar ahora» o programar una fecha y hora
+local. La programación se guarda en `factory_activation_schedule` del
+coordinador, firmada y de un solo uso. El servicio comprueba cada cinco segundos;
+una hora perdida por más de 60 segundos falla sin reintento automático. Pausar,
+detener o cancelar anula la programación pendiente. La cuenta Codex y su cuota
+se comprueban de nuevo al llegar la hora usando el mismo control `power` del
+botón GO; una sesión distinta requiere vinculación expresa antes de esa hora.
+La programación admite una fecha futura dentro de 30 días. La interfaz cerrada
+no afecta al temporizador mientras el puente continúe activo. Ninguna
+programación se crea al instalar o reiniciar el servicio.
+
+Para preparar una producción con otra cuenta: pausar, abrir «Cuenta Codex»,
+iniciar sesión con la cuenta deseada y «Vincular cuenta sin activar». Verificar
+que figura vinculada y que hay cuota; después introducir fecha y hora en
+«Programar activación» y confirmar. El dueño puede cancelar desde la misma
+órbita. Si la cuenta, autorización o cuota cambian antes de la hora, el arranque
+queda fallido y se muestra el motivo; hay que volver a programarlo expresamente.
+
 `python -m unittest discover -s tests -v` utiliza SQLite temporal, Git bare
 descartable y transportes sintéticos. No ejecuta tarjetas ni comentarios reales.
 Comprobar sintaxis de `remote.js` y diferencia de fuentes antes de desplegar.
