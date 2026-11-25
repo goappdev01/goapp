@@ -18772,7 +18772,7 @@ function HomeScreenContent() {
               backgroundColor: "#080808", alignItems: "center", justifyContent: "center",
               shadowColor: "#000000", shadowOpacity: 0.3, shadowRadius: 5,
               shadowOffset: { width: 0, height: 2 }, elevation: 5, zIndex: 5 }}>
-            <LandingShoppingCart size={shoppingShortcut.visualSize - 2} />
+            <LandingShoppingCart size={Math.round((shoppingShortcut.visualSize - 2) * 0.82)} />
           </TouchableOpacity>}
 
         </Animated.View>

@@ -35,16 +35,31 @@ test('the cart sits between LIST and FOOD without moving any existing orbit or f
           assert.ok(separated(cart, f.landingNavigationCloseRect, 0), `close ${device.width} ${hand}`);
           const list = geometry.obstacles.find(rect => rect.key === 'list');
           const food = geometry.obstacles.find(rect => rect.key === 'orbit-1');
-          const centerDistance = rect => Math.hypot(cart.x + cart.width / 2 - rect.x - rect.width / 2,
-            cart.y + cart.height / 2 - rect.y - rect.height / 2);
           const shortcut = f.ctx.shoppingShortcut;
           const ideal = { x: geometry.center.x + (geometry.mirrored ? -shortcut.x : shortcut.x) - shortcut.touchSize / 2,
             y: geometry.center.y + shortcut.y - shortcut.touchSize / 2,
             width: shortcut.touchSize, height: shortcut.touchSize };
-          if (separated(ideal, f.landingNavigationCloseRect, 0))
-            assert.ok(Math.abs(centerDistance(list) - centerDistance(food)) < 14,
-              `balanced LIST/FOOD ${device.width} ${preset} ${hand}`);
+          if (Math.abs(cart.x - ideal.x) < .01 && Math.abs(cart.y - ideal.y) < .01) {
+            const listGap = geometry.mirrored
+              ? list.x - cart.x - cart.width : cart.x - list.x - list.width;
+            const foodGap = food.y - cart.y - cart.height;
+            assert.ok(Math.abs(listGap - 6) < .01 && Math.abs(foodGap - 6) < .01,
+              `equal touch gaps beside LIST and above FOOD ${device.width} ${preset} ${hand}`);
+          }
         }
+});
+
+test('standard iPhone layout places the cart in the LIST–FOOD corner on both hands', () => {
+  for (const hand of ['right', 'left']) {
+    const f = fixture(devices[2], 'estandar', 'USER', hand);
+    const cart = f.landingShoppingRect;
+    const list = f.compactLandingGeometry.obstacles.find(rect => rect.key === 'list');
+    const food = f.compactLandingGeometry.obstacles.find(rect => rect.key === 'orbit-1');
+    assert.ok(cart && list && food);
+    assert.ok(cart.y + cart.height + 5 < food.y);
+    if (hand === 'right') assert.ok(list.x + list.width + 5 < cart.x);
+    else assert.ok(cart.x + cart.width + 5 < list.x);
+  }
 });
 
 test('Landing opens the existing GO Compras product orbit and closes directly back to Landing', () => {
@@ -71,6 +86,7 @@ test('Landing opens the existing GO Compras product orbit and closes directly ba
   const cartArt = fs.readFileSync('components/landing/LandingShoppingCart.tsx', 'utf8');
   assert.match(cartArt, /stroke="#FFFFFF"/);
   assert.doesNotMatch(cartArt, /LinearGradient|<Rect|fill="#[0-9A-F]{6}"/);
+  assert.match(shortcut, /<LandingShoppingCart size=\{Math\.round\(\(shoppingShortcut\.visualSize - 2\) \* 0\.82\)\}/);
   const shopping = fs.readFileSync('components/notes/GoShoppingNote.tsx', 'utf8');
   assert.match(shopping, /useState<"list"\|"add">\("add"\)/);
   assert.match(shopping, /testID="shopping-seven-orbits"/);

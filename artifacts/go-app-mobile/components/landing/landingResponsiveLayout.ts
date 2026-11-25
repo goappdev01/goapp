@@ -11,26 +11,17 @@ export const LANDING_SATELLITE_DEGREES: Record<string, number> = {
   contacts: 67.5, messages: 112.5, settings: 157.5, payment: 157.5, mas: 202.5,
 };
 
-/** Cart in the outer wedge between LIST and FOOD. Existing orbital centers and
- * sizes are inputs only: the cart never participates in their layout. */
+/** Place the cart in the open corner beside LIST and above FOOD. The two
+ * existing controls remain fixed; their touch bounds determine the gap. */
 export function landingShoppingShortcut(scale: number, orbitRadius: number, orbitSize: number,
   satelliteRadius: number, satelliteSize: number) {
   const visualSize = Math.max(34, Math.round(42 * scale));
   const touchSize = Math.max(44, visualSize);
-  const foodX = orbitRadius * Math.SQRT1_2, foodY = -foodX;
+  const foodY = -orbitRadius * Math.SQRT1_2;
   const listX = satelliteRadius * Math.cos(3 * Math.PI / 8);
-  const listY = -satelliteRadius * Math.sin(3 * Math.PI / 8);
-  const foodRight = foodX + Math.max(44, orbitSize) / 2;
-  const mapRight = satelliteRadius * Math.cos(Math.PI / 8) + Math.max(44, satelliteSize) / 2;
-  // Keep the cart within the original outer footprint, especially at compact scale.
-  const x = Math.min(foodRight + touchSize / 2 + 4, mapRight - touchSize / 2);
-  // Equal center distances make the visual spacing to LIST and FOOD balanced.
-  const balancedY = (foodX ** 2 + foodY ** 2 - listX ** 2 - listY ** 2 - 2 * x * (foodX - listX))
-    / (2 * (foodY - listY));
-  // At compact scale there is no horizontal gap beside FOOD's touch box.
-  const y = x - touchSize / 2 < foodRight
-    ? Math.min(balancedY, foodY - Math.max(44, orbitSize) / 2 - touchSize / 2 - 4)
-    : balancedY;
+  const gap = 6;
+  const x = listX + Math.max(44, satelliteSize) / 2 + gap + touchSize / 2;
+  const y = foodY - Math.max(44, orbitSize) / 2 - gap - touchSize / 2;
   return { x, y, touchSize, visualSize };
 }
 
