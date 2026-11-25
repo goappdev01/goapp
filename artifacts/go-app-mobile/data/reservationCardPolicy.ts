@@ -1,5 +1,6 @@
 import type {GoEntry} from "@/components/AgendaOperativa";
-export const GO_ENTRY_COLORS = { pending:"#FFD700", change:"#FF8C00", accepted:"#22c55e", done:"#22c55e", destructive:"#FF0000" } as const;
+import {GO_PENDING_ACTION_YELLOW} from "@/constants/colors";
+export const GO_ENTRY_COLORS = { pending:GO_PENDING_ACTION_YELLOW, change:"#FF8C00", accepted:"#22c55e", done:"#22c55e", destructive:"#FF0000" } as const;
 /** Render policy only. JWT/RLS and the server recheck every actual operation. */
 export function reservationCardPolicy(entry:GoEntry){
  const canonical=!!(entry.customerBooking || entry.businessBooking);

@@ -105,12 +105,24 @@ test('real confirmation buttons dispatch exactly one personal decision or open t
  const choices=nodes(tree,n=>['REALIZADO','PENDIENTE','PROPONER CAMBIO'].includes(n.props.accessibilityLabel));assert.equal(choices.length,6,'same controls exist in the inline area and hidden modal');
  for(const label of ['REALIZADO','PENDIENTE','PROPONER CAMBIO']){const b=choices.find(n=>n.props.accessibilityLabel===label);assert.equal(b.props.style.height,48);assert.ok(b.props.style.width>=44);assert.ok(b.props.style.minHeight>=44);b.props.onPress();}
  const pending=choices.find(n=>n.props.accessibilityLabel==='PENDIENTE');
- assert.equal(pending.props.style.backgroundColor,'#FACC15');
+ assert.equal(pending.props.style.backgroundColor,'#D9AD00');
  assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.color.toUpperCase(),'#FFFFFF');
  assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.backgroundColor,undefined);
  assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.paddingHorizontal,undefined);
  assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.textShadowColor,'#3b3000');
  assert.deepEqual(calls,[['one','done'],['one','pending']]);assert.deepEqual(ui.calls,[['propose','one']]);assert.equal(e.changeProposal,undefined);
+});
+test('Landing highlights only the persisted follow-up decision and keeps proposal unchanged',()=>{
+ const e=entry(),model={scope:S,doc:core.emptyCompletionDocument(S),candidates:[e],unresolved:[e],pending:[],selected:null,decide(){},setSelected(){},configure(){},busy:false,status:()=>"pending"};
+ const ui=uiFixture(model);
+ for(const status of ["pending","done"]){
+  model.status=()=>status;
+  const tree=ui.render(),pending=nodes(tree,n=>n.props.accessibilityLabel==='PENDIENTE')[0],done=nodes(tree,n=>n.props.accessibilityLabel==='REALIZADO')[0],proposal=nodes(tree,n=>n.props.accessibilityLabel==='PROPONER CAMBIO')[0];
+  assert.equal(pending.props.style.backgroundColor,status==='pending'?'#D9AD00':'#8A7400');
+  assert.equal(done.props.style.backgroundColor,status==='done'?'#167346':'#145F45');
+  assert.equal((status==='pending'?pending:done).props.style.borderWidth,2);
+  assert.equal(proposal.props.style.backgroundColor,'#C25300');
+ }
 });
 test('multiple unresolved/pending actions are reviewed individually and never disappear on a tab or close',()=>{
  const a=entry(),b=entry({id:'two'}),doc=core.emptyCompletionDocument(S),model={scope:S,doc,candidates:[a,b],unresolved:[a,b],pending:[],selected:null,setSelected:id=>model.selected=id,decide(){throw Error('No implicit response');},configure(){},busy:false};const ui=uiFixture(model);

@@ -19,9 +19,9 @@ test('only awaiting response becomes vivid yellow in the detail and shared chang
   const entry={...base,estado,changeProposal:{dateISO:'2030-10-27',time:'13:00'}};
   const tree=f.render(c.GoEntryDetailsSheet,{entry,onClose(){}}),state=nodes(tree,n=>n.props.testID==='entry-proposal-state')[0];
   assert.equal(texts(state),estado==='propuesto'?'CAMBIO RECIBIDO':'ESPERANDO RESPUESTA');
-  assert.equal(state.props.style.color,estado==='propuesto'?'#D1A166':'#FFD700');
+  assert.equal(state.props.style.color,estado==='propuesto'?'#D1A166':'#D9AD00');
   const quick=f.render(c.GoEntryQuickActions,{entry});
-  assert.equal(nodes(quick,n=>n.type==='Text'&&texts(n).startsWith('Cambio'))[0].props.style.color,estado==='propuesto'?'#FF8C00':'#FFD700');
+  assert.equal(nodes(quick,n=>n.type==='Text'&&texts(n).startsWith('Cambio'))[0].props.style.color,estado==='propuesto'?'#FF8C00':'#D9AD00');
  }
 });
 
@@ -236,7 +236,9 @@ test('opened and listed actions share solid semantic surfaces and white labels',
  const pending=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'pending'},onDone(){},onPending(){},onDiscard(){}});
  const done=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'done'},onDone(){},onPending(){},onDiscard(){}});
   assert.equal(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0].props.style.backgroundColor,'#D9AD00');
-   assert.equal(nodes(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0],n=>n.type==='Text')[0].props.style.color,'#181818');
+   assert.equal(nodes(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0],n=>n.type==='Text')[0].props.style.color,'#FFFFFF');
+  assert.equal(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0].props.style.backgroundColor,'#145F45');
+  assert.equal(nodes(done,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0].props.style.backgroundColor,'#8A7400');
   assert.equal(nodes(done,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0].props.style.backgroundColor,'#008754');
 });
 test('PENDIENTE is white directly on yellow in list and detail while PROPONER remains orange',()=>{
@@ -244,7 +246,7 @@ test('PENDIENTE is white directly on yellow in list and detail while PROPONER re
   for(const selected of [true,false]){
     const row=f.render(c.GoListActionRow,{actions:[{key:'pending',label:'PENDIENTE',tone:'pending',selectable:true,selected,onPress(){}}]});
     const button=nodes(row,n=>n.type==='TouchableOpacity')[0],text=nodes(button,n=>n.type==='Text')[0];
-    assert.equal(button.props.style.backgroundColor,'#FACC15');
+    assert.equal(button.props.style.backgroundColor,selected?'#D9AD00':'#8A7400');
     assert.equal(text.props.style.color,'#FFFFFF');
     assert.equal(text.props.style.backgroundColor,undefined);
     assert.equal(text.props.style.borderWidth,undefined);
@@ -253,7 +255,7 @@ test('PENDIENTE is white directly on yellow in list and detail while PROPONER re
   }
   const landing=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'pending'},pendingYellow:true,onDone(){},onPending(){},onDiscard(){}});
   const landingPending=nodes(landing,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0];
-  assert.equal(landingPending.props.style.backgroundColor,'#FACC15');
+  assert.equal(landingPending.props.style.backgroundColor,'#D9AD00');
   const landingLabel=nodes(landingPending,n=>n.type==='Text')[0];
   assert.equal(landingLabel.props.style.color,'#FFFFFF');
   assert.equal(landingLabel.props.style.backgroundColor,undefined);
@@ -346,12 +348,12 @@ for(const type of ['GO_BOOKING','TAREA_INTERNA'])test(`${type}: opening/closing 
 
 test('state colors and negative actions agree in compact and expanded cards without changing category colors',()=>{
  const f=fixture(),c=f.load('components/GoEntryDetails.tsx'),policy=f.load('data/reservationCardPolicy.ts'),original=JSON.stringify(base);
- for(const [status,key,color]of [['pendiente','booking_state_pending','#FFD700'],['confirmada','booking_state_accepted','#22c55e'],['completada','booking_state_completed','#22c55e'],['cancelada','booking_state_cancelled','#FF0000']]){
+ for(const [status,key,color]of [['pendiente','booking_state_pending','#D9AD00'],['confirmada','booking_state_accepted','#22c55e'],['completada','booking_state_completed','#22c55e'],['cancelada','booking_state_cancelled','#FF0000']]){
   const entry={...base,bookingStatus:status};assert.equal(policy.reservationCardPolicy(entry).stateColor,color);assert.equal(policy.reservationCardPolicy(entry).stateKey,key);
   for(const compact of [false,true]){const tree=f.render(c.GoEntryQuickActions,{entry,compact,onCancel(){},onPropose(){}});const state=nodes(tree,n=>n.type==='Text')[0];assert.equal(state.props.style.color,color);
     for(const action of nodes(tree,n=>n.props.accessibilityLabel==='CANCELAR')){assert.equal(action.props.style.at(-1).backgroundColor,'#D92D32');assert.equal(action.props.style.at(-1).borderColor,'rgba(255,255,255,0.22)');}}
  }
- const personal=f.render(c.GoEntryQuickActions,{entry:{...base,localResolutionStatus:'pending'}});assert.ok(texts(personal).includes('booking_state_accepted'));assert.ok(texts(personal).includes('Mi seguimiento:'));
+ const personal=f.render(c.GoEntryQuickActions,{entry:{...base,localResolutionStatus:'pending'}});assert.ok(texts(personal).includes('booking_state_accepted'));assert.ok(!texts(personal).includes('Mi seguimiento:'));
  assert.equal(JSON.stringify(base),original);assert.equal(base.color,'#00e5ff');
 });
 
@@ -362,7 +364,7 @@ test('three open microactions match Listados order in both hands without changin
     const tree=f.render(GoEntryMicroActions,{entry:base,handedness,onDone:()=>calls.push('done'),onPending:()=>calls.push('pending'),onDiscard:()=>calls.push('cancel')});
     const buttons=nodes(tree,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);let stopped=0;
     assert.deepEqual(buttons.map(b=>b.props.accessibilityLabel.replace('Mi seguimiento: ','')),handedness==='right'?['ELIMINAR','PENDIENTE','REALIZADA']:['REALIZADA','PENDIENTE','ELIMINAR']);
-    buttons.forEach(b=>{assert.equal(b.props.style.minHeight+b.props.hitSlop.top+b.props.hitSlop.bottom,44);assert.equal(b.props.hitSlop.left,0);assert.ok(nodes(b,n=>n.type==='Text').length);assert.equal(nodes(b,n=>n.type==='Feather').length,0);assert.equal(nodes(b,n=>n.type==='Text')[0].props.style.color,b.props.accessibilityLabel.endsWith('PENDIENTE')?'#181818':'#FFFFFF');b.props.onPress({stopPropagation(){stopped++;}});});
+    buttons.forEach(b=>{assert.equal(b.props.style.minHeight+b.props.hitSlop.top+b.props.hitSlop.bottom,44);assert.equal(b.props.hitSlop.left,0);assert.ok(nodes(b,n=>n.type==='Text').length);assert.equal(nodes(b,n=>n.type==='Feather').length,0);assert.equal(nodes(b,n=>n.type==='Text')[0].props.style.color,'#FFFFFF');b.props.onPress({stopPropagation(){stopped++;}});});
     assert.deepEqual(calls,handedness==='right'?['cancel','pending','done']:['done','pending','cancel']);assert.equal(stopped,3);
   }
   assert.equal(JSON.stringify(base),saved);assert.equal(f.render(GoEntryMicroActions,{entry:base}),null);

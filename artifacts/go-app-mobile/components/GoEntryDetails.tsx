@@ -11,7 +11,7 @@ import { reservationCardPolicy, GO_ENTRY_COLORS as C } from "@/data/reservationC
 import { GoCloseButton } from "./ui/GoCloseButton";
 import { landingCurrentEntry } from "./landing/landingPanels";
 import { GoScreenCloseSurface, GoScreenCloseGuide } from "@/components/ui/GoScreenCloseSurface";
-import { GO_PENDING_ACTION_YELLOW, GO_PENDING_ACTION_TEXT_SHADOW } from "../constants/colors";
+import { GO_DONE_ACTION_MUTED_GREEN, GO_PENDING_ACTION_MUTED_YELLOW, GO_PENDING_ACTION_YELLOW, GO_PENDING_ACTION_TEXT_SHADOW } from "../constants/colors";
 
 export function GoEntryCommunication({ entry }: { entry: GoEntry }) {
   const { lang } = useLanguage();
@@ -45,11 +45,10 @@ export type GoListAction = {
 /** Shared visual language for Listados and opened entry actions. */
 const GO_ACTION_PALETTE = {
   negative:{base:"#D92D32",muted:"#D92D32"},
-  pending:{base:"#D9AD00",muted:"#BFA000"},
+  pending:{base:GO_PENDING_ACTION_YELLOW,muted:GO_PENDING_ACTION_MUTED_YELLOW},
   intermediate:{base:"#C25300",muted:"#B75000"},
-  positive:{base:"#008754",muted:"#087D53"},
+  positive:{base:"#008754",muted:GO_DONE_ACTION_MUTED_GREEN},
 };
-function goActionTextColor(tone:GoListAction["tone"]){return tone==="pending"?"#181818":"#FFFFFF";}
 function goActionVisual(tone:GoListAction["tone"],selected=false,inactive=false,pressed=false){
   const color=GO_ACTION_PALETTE[tone];
   return {borderRadius:8,borderWidth:1,borderColor:selected?"rgba(255,255,255,0.38)":"rgba(255,255,255,0.22)",
@@ -71,10 +70,9 @@ export function GoListActionRow({actions,handedness="right",scale=1,testID="list
         onPress={event=>{event?.stopPropagation?.();action.onPress();}}
         style={{flex:1,flexBasis:0,flexShrink:1,minWidth:0,minHeight:Math.max(44,Math.round(44*scale)),paddingHorizontal:4,paddingVertical:8,
           ...goActionVisual(action.tone,!!action.selected,!!inactive),
-          ...(action.tone==="pending"?{backgroundColor:GO_PENDING_ACTION_YELLOW}:{}),
           ...(action.selected?{borderWidth:2,borderColor:"#ffffff"}:{}),alignItems:"center",justifyContent:"center"}}>
         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.8}
-          style={{color:action.tone==="pending"?"#FFFFFF":goActionTextColor(action.tone),fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",minWidth:0,
+          style={{color:"#FFFFFF",fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",minWidth:0,
             alignSelf:"stretch",width:"100%",...(action.tone==="pending"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{action.label}{action.selected?" ✓":""}</Text>
       </TouchableOpacity>;
     })}
@@ -82,7 +80,7 @@ export function GoListActionRow({actions,handedness="right",scale=1,testID="list
 }
 
 /** Personal follow-up never writes the contractual acceptance or completion of a reservation. */
-export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false,layout,handedness="right",listScale=1,pendingYellow=false}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean;layout?:"list"|"detail";handedness?:"left"|"right";listScale?:number;pendingYellow?:boolean}){
+export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false,layout,handedness="right",listScale=1}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean;layout?:"list"|"detail";handedness?:"left"|"right";listScale?:number;pendingYellow?:boolean}){
   const {lang}=useLanguage(),personal=!!(entry.reservationId||entry.customerBooking||entry.businessBooking);
   const [pressed,setPressed]=useState<string|null>(null);
   const list = layout === "list";
@@ -115,11 +113,10 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
       onPress={event=>{event?.stopPropagation();action.run?.();}}
       style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,...goActionVisual(action.tone,action.key==="discard"?false:selected(action.key),
         action.key!=="discard"&&!!onDone&&!!onPending&&!selected(action.key),pressed===action.key),
-        ...(pendingYellow&&action.key==="pending"?{backgroundColor:GO_PENDING_ACTION_YELLOW}:{}),
         opacity:disabled?0.48:pressed===action.key?0.88:1,alignItems:"center",justifyContent:"center"}}>
       <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2}
-        style={{color:pendingYellow&&action.key==="pending"?"#FFFFFF":goActionTextColor(action.tone),fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1,
-          ...(pendingYellow&&action.key==="pending"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{action.text}</Text>
+        style={{color:"#FFFFFF",fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1,
+          ...(action.key==="pending"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{action.text}</Text>
     </TouchableOpacity>)}
   </View>;
 }
@@ -142,7 +139,6 @@ export function GoEntryQuickActions({ entry, showState = true, compact = false, 
   if(stateOnly)return stateLabel;
   return <View testID="entry-quick-actions" style={{ gap: compact ? 4 : 8 }}>
     {showState && stateLabel}
-    {canonical&&entry.localResolutionStatus&&<Text style={{color:entry.localResolutionStatus==="done"?C.done:C.pending,fontSize:compact?10:13}}>{lang==="en"?"My follow-up: ":"Mi seguimiento: "}{entry.localResolutionStatus==="done"?(lang==="en"?"DONE":"REALIZADA"):(lang==="en"?"PENDING":"PENDIENTE")}</Text>}
     {pending && <Text numberOfLines={1} style={{color:received?C.change:C.pending,fontSize:compact?10:13,fontWeight:"700"}}>{received ? (lang === "en" ? "Change received · pending" : "Cambio recibido · pendiente") : (lang === "en" ? "Change · awaiting response" : "Cambio · esperando respuesta")}</Text>}
     {active && <View style={[s.actions, compact && {flexWrap:"nowrap",gap:6}]}>
       {button(received ? (lang === "en" ? "REJECT" : "RECHAZAR") : (lang === "en" ? "CANCEL" : "CANCELAR"), "negative", received ? actions.onReject : actions.onCancel)}

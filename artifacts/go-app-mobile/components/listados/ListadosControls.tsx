@@ -3,16 +3,10 @@ import React from "react";
 import { Pressable, Text, TouchableOpacity, View } from "react-native";
 
 /** Native flex measures the available width; only these two labels shrink, never the whole card. */
-export function ListEntryHeader({id,title,status,statusColor,followUp,categoryBadge,scale=1,lang="es"}: {
+export function ListEntryHeader({id,title,status,statusColor,categoryBadge,scale=1}: {
   id:string;title:string;status?:string;statusColor?:string;followUp?:"done"|"pending";categoryBadge?:React.ReactNode;scale?:number;lang?:string;
 }) {
-  const followUpLabel=followUp==="done"?(lang==="en"?"DONE":"REALIZADA")
-    :followUp==="pending"?(lang==="en"?"PENDING":"PENDIENTE"):(lang==="en"?"Unmarked":"Sin marcar");
-  const followUpText=<Text testID={"list-follow-up-"+id} accessibilityLiveRegion="polite"
-    style={{color:"#d6d6dc",fontSize:12,textAlign:"right",...(categoryBadge?{flexShrink:1,marginLeft:"auto" as const}:{alignSelf:"stretch" as const})}}>
-    {lang==="en"?"Follow-up: ":"Seguimiento: "}{followUpLabel}
-  </Text>;
-  return <View testID={"list-header-"+id} style={{gap:3,marginBottom:4}}>
+  return <View testID={"list-header-"+id} style={{gap:categoryBadge?3:0,marginBottom:categoryBadge?4:2}}>
     <View testID={"list-header-line-"+id} style={{flexDirection:"row",alignItems:"center",flexWrap:"nowrap",gap:8}}>
       <Text testID={"list-title-"+id} accessibilityLabel={title} numberOfLines={1} ellipsizeMode="tail"
         adjustsFontSizeToFit minimumFontScale={0.82} maxFontSizeMultiplier={1.8}
@@ -23,9 +17,7 @@ export function ListEntryHeader({id,title,status,statusColor,followUp,categoryBa
           style={{color:statusColor||"#ffffff",fontSize:Math.max(11,Math.round(11*scale)),fontWeight:"800",textAlign:"right"}}>{status}</Text>
       </View>}
     </View>
-    {categoryBadge
-      ? <View testID={"list-header-meta-"+id} style={{flexDirection:"row",alignItems:"center",gap:8}}>{categoryBadge}{followUpText}</View>
-      : followUpText}
+    {categoryBadge && <View testID={"list-header-meta-"+id} style={{flexDirection:"row",alignItems:"center"}}>{categoryBadge}</View>}
   </View>;
 }
 

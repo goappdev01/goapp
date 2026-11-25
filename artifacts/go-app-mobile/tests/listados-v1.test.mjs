@@ -58,7 +58,7 @@ for(const width of [320,375,390,430])for(const hand of ['left','right'])for(cons
  const header=nodes(tree).find(n=>n.props.testID==='list-header-line-one'),title=nodes(header).find(n=>n.props.testID==='list-title-one');
  assert.equal(header.props.style.flexWrap,'nowrap');assert.equal(header.props.style.flexDirection,'row');assert.equal(title.props.style.flex,1);assert.equal(title.props.style.minWidth,0);assert.equal(title.props.numberOfLines,1);
  const badge=nodes(header).find(n=>n.props.testID==='list-reservation-status-one');assert.equal(text(badge),'CONFIRMADA');assert.equal(nodes(badge).find(n=>n.type==='Text').props.numberOfLines,1);
- assert.match(text(tree),/Seguimiento: Sin marcar/);
+ assert.doesNotMatch(text(tree),/Seguimiento:/);
  const rows=nodes(tree).filter(n=>n.props.testID==='entry-micro-actions');assert.equal(rows.length,1);
  const buttons=nodes(rows[0]).filter(n=>n.type==='TouchableOpacity');assert.deepEqual(buttons.map(text),hand==='right'?['ELIMINAR','PENDIENTE','REALIZADA']:['REALIZADA','PENDIENTE','ELIMINAR']);
  assert.ok(buttons.every(n=>n.props.style.minHeight>=44));assert.ok(buttons.every(n=>!n.props.accessibilityState.selected));assert.equal(nodes(rows[0]).some(n=>n.type==='Feather'),false);
@@ -70,10 +70,14 @@ test('only the explicitly selected personal button has a check and border, witho
  for(const followUp of ['pending','done','pending']){
   const f=card({followUp}),row=nodes(f.tree).find(n=>n.props.testID==='entry-micro-actions'),selected=nodes(row).filter(n=>n.props.accessibilityState?.selected);
   assert.equal(selected.length,1);assert.equal(text(selected[0]),followUp==='done'?'REALIZADA ✓':'PENDIENTE ✓');assert.equal(selected[0].props.style.borderWidth,2);
-  assert.match(text(f.tree),followUp==='done'?/Seguimiento: REALIZADA/:/Seguimiento: PENDIENTE/);assert.match(text(f.tree),/CONFIRMADA/);
+  const buttons=nodes(row).filter(n=>n.type==='TouchableOpacity'),pending=buttons.find(n=>text(n).startsWith('PENDIENTE')),done=buttons.find(n=>text(n).startsWith('REALIZADA'));
+  assert.equal(pending.props.style.backgroundColor,followUp==='pending'?'#D9AD00':'#8A7400');
+  assert.equal(done.props.style.backgroundColor,followUp==='done'?'#008754':'#145F45');
+  assert.equal(nodes(pending).find(n=>n.type==='Text').props.style.color,'#FFFFFF');
+  assert.doesNotMatch(text(f.tree),/Seguimiento:/);assert.match(text(f.tree),/CONFIRMADA/);
   selected[0].props.onPress({stopPropagation(){}});assert.equal(f.calls[0][0],followUp==='done'?'done':'pending');
  }
- assert.match(text(card({entry:{...base,id:'two',reservationId:'other'}}).tree),/Sin marcar/);assert.equal(JSON.stringify(base),before);
+ assert.doesNotMatch(text(card({entry:{...base,id:'two',reservationId:'other'}}).tree),/Seguimiento:/);assert.equal(JSON.stringify(base),before);
 });
 
 test('received proposals keep original/new dates but contractual actions live only in the complete detail',()=>{
@@ -104,7 +108,7 @@ test('internal-task category stays content-width and retains its full accessible
  assert.equal(text(badge),'TAREA INT');
  const meta=nodes(internal).find(n=>n.props.testID==='list-header-meta-internal');
  assert.ok(nodes(meta).includes(badge));
- assert.ok(nodes(meta).some(n=>n.props.testID==='list-follow-up-internal'));
+ assert.equal(nodes(meta).some(n=>n.props.testID==='list-follow-up-internal'),false);
  assert.equal(nodes(internal).filter(n=>n.props.testID==='list-category-badge-internal').length,1);
  const external=card({entry:{...entry,id:'external',type:'TAREA'}}).tree;
  assert.equal(nodes(external).find(n=>n.props.testID==='list-category-badge-external').props.style.alignSelf,undefined);
