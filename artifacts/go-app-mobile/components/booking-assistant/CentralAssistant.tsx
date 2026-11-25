@@ -1,8 +1,8 @@
 import React,{useEffect,useMemo,useReducer,useState} from "react";
-import {AppState,Platform,Text,TouchableOpacity,View} from "react-native";
+import {Alert,AppState,Platform,Text,TouchableOpacity,View} from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Speech from "expo-speech";
-import {CentralConversation} from "@/lib/centralConversation";
+import {CentralConversation,CentralHistoryConflict} from "@/lib/centralConversation";
 import {centralAssistantApi} from "@/lib/centralAssistant";
 import {onSessionChanged} from "@/lib/sessionEvents";
 import {BookingAssistantScreen,type BookingAssistantProps} from "./BookingAssistantScreen";
@@ -11,33 +11,52 @@ import {BookingAssistantScreen,type BookingAssistantProps} from "./BookingAssist
 export function CentralAssistant({userId,...props}:BookingAssistantProps&{userId:string}){
   const [cancelRequest,setCancelRequest]=useState(0);
   const [,render]=useReducer(n=>n+1,0),[capability,setCapability]=useState("Comprobando conexión…");
+  const [historyAvailable,setHistoryAvailable]=useState(false),[cloudError,setCloudError]=useState("");
   const model=useMemo(()=>new CentralConversation(userId,{
     read:key=>AsyncStorage.getItem(key),write:(key,value)=>AsyncStorage.setItem(key,value),remove:key=>AsyncStorage.removeItem(key),
     respond:(messages,signal)=>centralAssistantApi(userId,"/respond",{messages,consent:true},signal),
+    cloud:{read:()=>centralAssistantApi(userId,"/history"),
+      write:(revision,messages)=>centralAssistantApi(userId,"/history",{consent:true,revision,messages},undefined,"PUT")},
     speak:(text,onStart,onDone,onError)=>{try{Speech.speak(text,{language:"es-ES",onStart,onDone,onStopped:onDone,onError});}catch{onError();}},stop:()=>{void Speech.stop().catch(()=>{});},
   }),[userId]);
   useEffect(()=>model.subscribe(render),[model]);
-  useEffect(()=>{if(!props.visible){model.setConsent(false);return;}if(!model.ready)void model.restore();let current=true;
-    centralAssistantApi<{conversation:boolean}>(userId,"/capabilities").then(c=>{if(current)setCapability(c.conversation?"OpenAI disponible · solo conversación":"OpenAI pendiente de habilitación. No se han realizado llamadas al modelo.");}).catch(error=>{if(current)setCapability(error instanceof Error?error.message:"No se pudo comprobar la IA.");});
+  useEffect(()=>{if(!props.visible){model.setConsent(false);return;}let current=true;
+    void (model.ready?Promise.resolve():model.restore()).then(()=>centralAssistantApi<{conversation:boolean;history:string}>(userId,"/capabilities")).then(c=>{
+      if(!current)return;setCapability(c.conversation?"OpenAI disponible · solo conversación":"OpenAI pendiente de habilitación. No se han realizado llamadas al modelo.");
+      setHistoryAvailable(c.history==="account-opt-in");if(c.history==="account-opt-in")void model.restoreCloudPreference();
+    }).catch(error=>{if(current)setCapability(error instanceof Error?error.message:"No se pudo comprobar la IA.");});
     return()=>{current=false;model.setConsent(false);};
   },[model,props.visible,userId]);
   useEffect(()=>{const off=onSessionChanged(()=>model.setConsent(false)),app=AppState.addEventListener("change",state=>{if(state!=="active")model.setConsent(false);});return()=>{off();app.remove();model.interrupt();};},[model]);
   const interrupt=()=>{model.interrupt();setCancelRequest(n=>n+1);};
+  const toggleCloud=()=>{
+    setCloudError("");if(model.cloudEnabled){void model.disableCloud().catch(()=>setCloudError("No se pudo cambiar la preferencia de sincronización."));return;}
+    void model.enableCloud().catch(error=>{
+      if(error instanceof CentralHistoryConflict)Alert.alert("Historial de la cuenta","Ya existe una conversación diferente. Al recuperarla se sustituirá la copia de este dispositivo.",[
+        {text:"Cancelar",style:"cancel"},{text:"Usar historial de la cuenta",onPress:()=>{void model.enableCloud(true).catch(()=>setCloudError("No se pudo recuperar el historial de la cuenta."));}},
+      ]);
+      else setCloudError(error instanceof Error?error.message:"No se pudo activar la sincronización.");
+    });
+  };
   const toggle=(id:string,label:string,checked:boolean,press:()=>void)=><TouchableOpacity testID={id} accessibilityRole="checkbox" accessibilityState={{checked}} onPress={press} style={{minHeight:44,padding:8,justifyContent:"center"}}><Text style={{fontSize:14,color:"#183955"}}>{checked?"☑":"☐"} {label}</Text></TouchableOpacity>;
   const controls=<View testID="central-ai-privacy" style={{paddingHorizontal:12,gap:2}}>
     <Text accessibilityLiveRegion="polite" style={{fontSize:12,color:"#41556b"}}>{capability}</Text>
     <Text style={{fontSize:12,color:"#41556b"}}>Solo se envían a OpenAI los mensajes de este chat. No se consultan ni modifican tus datos de GO.</Text>
     {toggle("central-ai-consent","Permitir envío a OpenAI en esta sesión",model.consent,()=>{if(model.consent)interrupt();model.setConsent(!model.consent);})}
     <View style={{flexDirection:"row",flexWrap:"wrap"}}>
-      {toggle("central-ai-remember","Recordar este chat en este dispositivo",model.remember,()=>model.setRemember(!model.remember))}
+      {toggle("central-ai-remember","Recordar este chat en este dispositivo",model.remember,()=>model.cloudEnabled?Alert.alert("Historial sincronizado","Desactiva primero la sincronización si quieres quitar la copia de este dispositivo."):model.setRemember(!model.remember))}
       {toggle("central-ai-speak","Leer respuestas en voz alta",model.voice,()=>model.setVoice(!model.voice))}
     </View>
-    {model.remember&&<Text style={{fontSize:12,color:"#41556b"}}>Historial local de esta cuenta, sin sincronización remota. Puedes borrarlo aquí.</Text>}
+    {historyAvailable&&toggle("central-ai-cloud","Sincronizar este chat entre mis dispositivos",model.cloudEnabled,toggleCloud)}
+    {model.remember&&!model.cloudEnabled&&<Text style={{fontSize:12,color:"#41556b"}}>Historial local de esta cuenta, sin sincronización remota. Puedes borrarlo aquí.</Text>}
+    {model.cloudEnabled&&<Text style={{fontSize:12,color:"#41556b"}}>Historial de esta cuenta. Cada mensaje se guarda para recuperarlo en otro dispositivo autorizado.</Text>}
     <View style={{flexDirection:"row",gap:12}}>
       <TouchableOpacity testID="central-ai-interrupt" onPress={interrupt} style={{minHeight:44,padding:8}}><Text>Interrumpir respuesta</Text></TouchableOpacity>
       <TouchableOpacity testID="central-ai-clear" onPress={()=>{interrupt();model.clear();}} style={{minHeight:44,padding:8}}><Text>Borrar conversación</Text></TouchableOpacity>
     </View>
     {!!model.notice&&<Text accessibilityLiveRegion="polite">{model.notice}</Text>}
+    {!!cloudError&&<Text accessibilityLiveRegion="polite">{cloudError}</Text>}
+    {model.usage.measuredCalls>0&&<Text style={{fontSize:12,color:"#41556b"}}>Esta sesión: {model.usage.inputTokens} tokens de entrada · {model.usage.outputTokens} de salida · última respuesta {model.usage.lastLatencyMs} ms</Text>}
   </View>;
   return <BookingAssistantScreen {...props} consultation={{scopeKey:"central:"+userId,cancelRequest,title:"Conversa con GO",introduction:"Conversa sobre cualquier tema. Esta fase no ejecuta acciones.",navigationKey:"central-assistant",sourceText:"",controls,speaking:model.speaking,completed:model.completed,
     messages:[{id:"intro",role:"assistant",text:"Puedes escribir, corregir o continuar una conversación. Autoriza el envío antes de usar OpenAI."},...model.messages.map((m,i)=>({...m,id:i}))],

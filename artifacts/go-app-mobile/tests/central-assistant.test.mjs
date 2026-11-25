@@ -5,7 +5,7 @@ const {CentralConversation}=h.load('lib/centralConversation.ts',{'@workspace/api
 const idle=()=>new Promise(setImmediate);
 function fixture(){const disk=new Map(),sent=[],spoken=[],stops=[],speechCallbacks=[];let response=async()=>({answer:'Respuesta general sobre astronomía'});
  const deps={read:async k=>disk.get(k)??null,write:async(k,v)=>{disk.set(k,v);},remove:async k=>{disk.delete(k);},respond:async(m,s)=>{sent.push({messages:JSON.parse(JSON.stringify(m)),signal:s});return response(m,s);},speak:(t,onStart,onDone,onError)=>{spoken.push(t);speechCallbacks.push({onStart,onDone,onError});},stop:()=>stops.push(true)};
- return{disk,sent,spoken,stops,speechCallbacks,model:id=>new CentralConversation(id,deps),setResponse:fn=>response=fn};}
+ return{disk,sent,spoken,stops,speechCallbacks,deps,model:id=>new CentralConversation(id,deps),setResponse:fn=>response=fn};}
 
 test('general context requires consent; only typed conversation is passed and no action tools exist',async()=>{
  const f=fixture(),a=f.model('ADMIN-A');await a.restore();await assert.rejects(()=>a.respond('Hola'),/Autoriza/);assert.equal(f.sent.length,0);
@@ -47,4 +47,40 @@ test('central client rejects non-ADMIN and changed identities before/after trans
 });
 test('queued local writes cannot revive a cleared conversation',async()=>{
  const f=fixture(),a=f.model('A');await a.restore();a.setConsent(true);a.setRemember(true);await a.respond('No conservar tras borrar');a.clear();await idle();const reopened=f.model('A');await reopened.restore();assert.equal(reopened.messages.length,0);assert.equal(reopened.consent,false);
+});
+
+test('account history is opt-in, restores on another device, and rejects stale writes without losing local text',async()=>{
+ const f=fixture(),remote={revision:0,messages:[]};
+ f.deps.cloud={read:async()=>JSON.parse(JSON.stringify(remote)),write:async(revision,messages)=>{
+   if(revision!==remote.revision)throw Error('revision conflict');
+   remote.revision++;remote.messages=JSON.parse(JSON.stringify(messages));return{revision:remote.revision};
+ }};
+ const a=f.model('ADMIN-A');await a.restore();a.setConsent(true);await a.respond('Primer mensaje');await idle();
+ assert.equal(remote.revision,0);await a.enableCloud();await idle();assert.equal(remote.revision,1);assert.equal(a.remember,true);
+ a.setRemember(false);assert.equal(a.remember,true);
+ const otherDevice=fixture();otherDevice.deps.cloud=f.deps.cloud;
+ const b=otherDevice.model('ADMIN-A');await b.restore();await b.enableCloud();assert.equal(b.cloudEnabled,true);assert.equal(b.messages.length,2);assert.equal(b.consent,false);
+ a.setConsent(true);await a.respond('Segundo mensaje');await idle();
+ b.setConsent(true);await b.respond('Cambio simultáneo');await idle();
+ assert.equal(b.cloudEnabled,false);assert.match(b.notice,/No se pudo sincronizar/);assert.equal(b.messages.at(-2).text,'Cambio simultáneo');
+ const offline=otherDevice.model('ADMIN-A');await offline.restore();assert.equal(offline.messages.at(-2).text,'Cambio simultáneo');
+ assert.equal(remote.messages.at(-2).text,'Segundo mensaje');
+ a.clear();await idle();assert.equal(remote.messages.length,0);
+ const reopened=f.model('ADMIN-A');await reopened.restore();await reopened.restoreCloudPreference();assert.equal(reopened.messages.length,0);
+});
+
+test('a different local chat requires explicit choice before replacing it with account history',async()=>{
+ const f=fixture();f.deps.cloud={read:async()=>({revision:3,messages:[{role:'user',text:'Remoto'}]}),write:async()=>{throw Error('unexpected write');}};
+ const a=f.model('ADMIN-A');await a.restore();a.setConsent(true);await a.respond('Local');await idle();
+ await assert.rejects(()=>a.enableCloud(),/conversación diferente/);assert.equal(a.cloudEnabled,false);assert.equal(a.messages[0].text,'Local');
+ await a.enableCloud(true);assert.equal(a.cloudEnabled,true);assert.equal(a.messages[0].text,'Remoto');
+});
+
+test('provider usage is counted only after a completed response and contains no conversation text',async()=>{
+ const f=fixture(),a=f.model('ADMIN-A');await a.restore();a.setConsent(true);
+ f.setResponse(async()=>({answer:'Primera respuesta',metrics:{inputTokens:40,outputTokens:12,latencyMs:320}}));
+ await a.respond('Consulta');assert.equal(a.usage.inputTokens,40);assert.equal(a.usage.outputTokens,12);assert.equal(a.usage.measuredCalls,1);
+ assert.ok(!JSON.stringify(a.usage).includes('Consulta'));
+ f.setResponse(async()=>{throw Error('network');});await assert.rejects(()=>a.respond('Otra'),/network/);
+ assert.equal(a.usage.measuredCalls,1);
 });

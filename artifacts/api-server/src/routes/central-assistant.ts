@@ -1,6 +1,7 @@
 import {Router,type IRouter} from "express";
-import {centralConversationSchema} from "@workspace/api-zod";
+import {centralConversationSchema,centralHistoryWriteSchema} from "@workspace/api-zod";
 import {requireAdmin} from "../middleware/requireAdmin";
+import {bearerHeader,supabaseRequest} from "../lib/supabase";
 
 const router:IRouter=Router();
 router.use(requireAdmin);
@@ -12,7 +13,42 @@ function settings(){
   const enabled=process.env.GO_CENTRAL_AI_ENABLED==="true"&&!!key&&!!model&&output>0&&requests>0;
   return {enabled,key,model,output,requests,transcription:enabled&&process.env.GO_CENTRAL_AI_TRANSCRIPTION_ENABLED==="true"&&!!process.env.GO_CENTRAL_AI_TRANSCRIPTION_MODEL};
 }
-router.get("/capabilities",(_req,res)=>{const c=settings();res.json({conversation:c.enabled,transcription:c.transcription,actions:false,history:"local-opt-in"});});
+const historyEnabled=()=>process.env.GO_CENTRAL_AI_HISTORY_ENABLED==="true";
+router.get("/capabilities",(_req,res)=>{const c=settings();res.json({conversation:c.enabled,transcription:c.transcription,actions:false,history:historyEnabled()?"account-opt-in":"local-opt-in"});});
+
+/** Dormant until the reviewed table and RLS are deployed. Caller JWT remains authoritative. */
+router.get("/history",async(req,res)=>{
+  if(!historyEnabled()){res.status(503).json({error:"El historial entre dispositivos aún no está habilitado."});return;}
+  try{
+    const query=new URLSearchParams({user_id:`eq.${res.locals.adminUserId}`,select:"revision,messages",limit:"1"});
+    const response=await supabaseRequest(`/rest/v1/go_ai_conversations?${query}`,{headers:bearerHeader(req.header("authorization"))});
+    if(!response.ok)throw Error("History read unavailable");
+    const rows=await response.json() as unknown;
+    if(!Array.isArray(rows)||rows.length>1)throw Error("Invalid history response");
+    if(!rows.length){res.json({revision:0,messages:[]});return;}
+    const row=rows[0] as {revision?:unknown;messages?:unknown};
+    const checked=centralHistoryWriteSchema.safeParse({consent:true,revision:row.revision,messages:row.messages});
+    if(!checked.success||checked.data.revision===0)throw Error("Invalid history data");
+    res.json({revision:checked.data.revision,messages:checked.data.messages});
+  }catch{res.status(502).json({error:"No se pudo recuperar el historial de esta cuenta."});}
+});
+router.put("/history",async(req,res)=>{
+  if(!historyEnabled()){res.status(503).json({error:"El historial entre dispositivos aún no está habilitado."});return;}
+  const parsed=centralHistoryWriteSchema.safeParse(req.body);
+  if(!parsed.success){res.status(400).json({error:"Autoriza el guardado y envía un historial válido."});return;}
+  const {revision,messages}=parsed.data,userId=res.locals.adminUserId as string;
+  const headers={...bearerHeader(req.header("authorization")),"Content-Type":"application/json",Prefer:"return=representation"};
+  const body=JSON.stringify({user_id:userId,messages,revision:revision+1,updated_at:new Date().toISOString()});
+  try{
+    const query=revision===0?"select=revision":new URLSearchParams({user_id:`eq.${userId}`,revision:`eq.${revision}`,select:"revision"}).toString();
+    const response=await supabaseRequest(`/rest/v1/go_ai_conversations?${query}`,{method:revision===0?"POST":"PATCH",headers,body});
+    if(response.status===409){res.status(409).json({error:"El historial cambió en otra sesión. Recárgalo antes de guardar."});return;}
+    if(!response.ok)throw Error("History write unavailable");
+    const rows=await response.json() as {revision?:unknown}[];
+    if(!Array.isArray(rows)||rows.length!==1||rows[0]?.revision!==revision+1){res.status(409).json({error:"El historial cambió en otra sesión. Recárgalo antes de guardar."});return;}
+    res.json({revision:revision+1});
+  }catch{res.status(502).json({error:"No se pudo guardar el historial entre dispositivos."});}
+});
 router.post(["/respond","/transcribe"],async(req,res)=>{
   const c=settings(),audio=req.path==="/transcribe";
   if(req.body?.consent!==true){res.status(400).json({error:"Autoriza el envío de esta conversación a OpenAI antes de continuar."});return;}
@@ -25,6 +61,7 @@ router.post(["/respond","/transcribe"],async(req,res)=>{
   const w=windows.get(user)??{count:0,until:now+60000};
   if(w.count>=c.requests){res.setHeader("Retry-After",String(Math.max(1,Math.ceil((w.until-now)/1000))));res.status(429).json({error:"Has alcanzado el límite de solicitudes configurado. Espera un momento."});return;}
   w.count++;windows.set(user,w);
+  const started=Date.now();
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
   const disconnected=()=>{if(!res.writableEnded)controller.abort();};res.on("close",disconnected);
   try{
@@ -39,10 +76,12 @@ router.post(["/respond","/transcribe"],async(req,res)=>{
     }
     const upstream=await fetch("https://api.openai.com/v1/"+(audio?"audio/transcriptions":"responses"),{method:"POST",redirect:"error",headers:{Authorization:"Bearer "+c.key,...(!audio?{"Content-Type":"application/json"}:{})},body,signal:controller.signal});
     if(!upstream.ok){res.status(upstream.status===429?429:502).json({error:"OpenAI no puede responder ahora. Conserva tu texto e inténtalo más tarde."});return;}
-    const result=await upstream.json() as {text?:unknown;status?:string;output?:{type?:string;role?:string;content?:{type?:string;text?:string}[]}[]};
+    const result=await upstream.json() as {text?:unknown;status?:string;usage?:{input_tokens?:unknown;output_tokens?:unknown};output?:{type?:string;role?:string;content?:{type?:string;text?:string}[]}[]};
     const text=audio?result.text:Array.isArray(result.output)?result.output.filter((o:any)=>o.type==="message"&&o.role==="assistant").flatMap((o:any)=>o.content??[]).filter((o:any)=>o.type==="output_text").map((o:any)=>o.text).join("\n"):null;
     if(typeof text!=="string"||!text.trim()||text.length>4000||!audio&&result.status!=="completed")throw Error("Invalid or incomplete provider response");
-    res.json(audio?{text}:{answer:text});
+    const tokens=(value:unknown)=>Number.isSafeInteger(value)&&Number(value)>=0?Number(value):undefined;
+    res.json(audio?{text,metrics:{latencyMs:Date.now()-started}}
+      :{answer:text,metrics:{latencyMs:Date.now()-started,inputTokens:tokens(result.usage?.input_tokens),outputTokens:tokens(result.usage?.output_tokens)}});
   }catch{if(!res.destroyed)res.status(502).json({error:"La conexión se ha interrumpido. Puedes continuar por texto o volver a intentarlo."});}
   finally{clearTimeout(timer);res.off("close",disconnected);}
 });
