@@ -38,7 +38,7 @@ export function shoppingOrbitLayout(width:number,_fontScale=1,_handedness:"left"
 }
 const orbitalLines:Record<string,string[]>={
   produce:["FRUTAS Y","VERDURAS"],protein:["CARNICERÍA","Y PESCADERÍA"],drinks:["BEBIDAS"],
-  bakery:["PANADERÍA","Y PASTAS"],dairy:["LÁCTEOS Y","REFRIGERADOS"],pantry:["DESPENSA"],
+  bakery:["PANADERÍA Y","REPOSTERÍA"],dairy:["LÁCTEOS Y","REFRIGERADOS"],pantry:["ALIMENTOS"],
   care:["HIGIENE Y","PERFUMERÍA"],home:["OTROS","(HOGAR)"],
 };
 /** Fixed interior zones use circle chords, not the square's transparent corners. */

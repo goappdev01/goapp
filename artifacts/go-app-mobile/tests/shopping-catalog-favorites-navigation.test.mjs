@@ -6,7 +6,7 @@ const row='shopping-catalog-bakery-Pan común';
 
 test('catalog star creates one unselected favorite and never changes a prepared checkbox, even when it gains a canonical id',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería');await ui.tap(row);assert.equal(ui.hosts.get(row).accessibilityState.checked,true);assert.equal(f.doc().items.length,0);
+  ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería y repostería');await ui.tap(row);assert.equal(ui.hosts.get(row).accessibilityState.checked,true);assert.equal(f.doc().items.length,0);
   const star=ui.hosts.get(row+'-favorite');await ui.run(()=>{star.onPress();star.onPress();});await ui.idle();const item=f.doc().items[0];assert.equal(f.doc().items.length,1);assert.equal(item.favorite,true);assert.equal(item.selected,false);assert.equal(item.bought,false);assert.equal(ui.hosts.get(row).accessibilityState.checked,true);assert.equal(ui.hosts.get(row+'-favorite').accessibilityState.checked,true);assert.equal(ui.hosts.get('shopping-catalog-save').disabled,false);
   await ui.tap(row+'-favorite');assert.equal(f.doc().items[0].favorite,false);assert.equal(ui.hosts.get(row).accessibilityState.checked,true);
   await ui.tap(row);assert.equal(ui.hosts.get(row).accessibilityState.checked,false);assert.equal(ui.hosts.get('shopping-catalog-save').disabled,true);assert.equal(f.doc().items[0].selected,false);
@@ -17,7 +17,7 @@ test('catalog star creates one unselected favorite and never changes a prepared 
 test('star remains enabled for an in-list product and preserves quantity, prices, bought state and history',async()=>{
  const f=await shoppingFixture();let ui;try{
   await f.open();const item=await f.add('Pan común',{category:'bakery',quantity:'3'});await f.run({type:'price',id:item.id,value:1.75,unit:item.unit,observationId:'bread-price'});await f.run({type:'bought',id:item.id,value:true});const before=h.plain(f.doc().items[0]);
-  ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería');assert.equal(ui.hosts.get(row).disabled,true);assert.equal(ui.hosts.get(row+'-favorite').disabled,false);await ui.tap(row+'-favorite');
+  ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería y repostería');assert.equal(ui.hosts.get(row).disabled,true);assert.equal(ui.hosts.get(row+'-favorite').disabled,false);await ui.tap(row+'-favorite');
   const after=h.plain(f.doc().items[0]);assert.equal(after.favorite,true);delete before.favorite;delete after.favorite;assert.deepEqual(after,before);assert.equal(f.doc().items.length,1);
   await ui.tap('shopping-back');await ui.tap('shopping-back');await ui.tap('shopping-list');assert.equal(ui.hosts.get('shopping-favorite-'+item.id).accessibilityState.checked,true);
  }finally{await ui?.close();f.disk.close();}
@@ -51,7 +51,7 @@ test('favorite import cannot read or change another context or account',async()=
 
 test('one batch save returns only to Landing, ignores repeated/stale presses and can immediately continue in another category',async()=>{
  const f=await shoppingFixture();let ui;try{
-  const original=await f.open(),target=await f.api().createShoppingList(f.disk.scope,f.disk.active,'Viaje');ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería');await ui.tap(row);await ui.tap('shopping-catalog-bakery-Baguette');const save=ui.hosts.get('shopping-catalog-save');
+  const original=await f.open(),target=await f.api().createShoppingList(f.disk.scope,f.disk.active,'Viaje');ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería y repostería');await ui.tap(row);await ui.tap('shopping-catalog-bakery-Baguette');const save=ui.hosts.get('shopping-catalog-save');
   await ui.run(()=>{save.onPress();save.onPress();});await ui.idle();assert.ok(ui.hosts.has('shopping-seven-orbits'));assert.equal(ui.hosts.has('shopping-catalog-save'),false);assert.equal(ui.hosts.has('shopping-add'),false);assert.match(ui.container.textContent,/Selección guardada en «Viaje»/);assert.equal(f.doc().items.length,2);assert.equal(f.doc().operations.length,1);
   await ui.run(()=>save.onPress());await ui.idle();assert.equal(f.doc().operations.length,1);assert.equal((await f.open()).id,target.id);assert.equal(f.disk.rows.find(r=>r.id===original.id).note.shopping.items.length,0);
   await enter(ui,'produce','Frutas');await ui.tap('shopping-catalog-produce-Manzanas');await ui.tap('shopping-catalog-save');assert.ok(ui.hosts.has('shopping-seven-orbits'));assert.equal(f.doc().items.length,3);await ui.tap('shopping-list');assert.ok(ui.hosts.has('shopping-item-'+f.doc().items[0].id));
@@ -59,21 +59,21 @@ test('one batch save returns only to Landing, ignores repeated/stale presses and
 });
 for(const failure of ['write','read'])test('failed '+failure+' keeps the category and selection, then verifies retry before returning to Landing',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería');await ui.tap(row);const fail=failure==='write'?f.disk.failWrite:f.disk.failRead;fail(true);await ui.tap('shopping-catalog-save');assert.ok(ui.hosts.has('shopping-error'));assert.ok(ui.hosts.has(row));assert.equal(ui.hosts.has('shopping-seven-orbits'),false);assert.equal(ui.hosts.get(row).accessibilityState.checked,true);assert.equal(ui.hosts.get('shopping-catalog-save').disabled,false);fail(false);
+  ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería y repostería');await ui.tap(row);const fail=failure==='write'?f.disk.failWrite:f.disk.failRead;fail(true);await ui.tap('shopping-catalog-save');assert.ok(ui.hosts.has('shopping-error'));assert.ok(ui.hosts.has(row));assert.equal(ui.hosts.has('shopping-seven-orbits'),false);assert.equal(ui.hosts.get(row).accessibilityState.checked,true);assert.equal(ui.hosts.get('shopping-catalog-save').disabled,false);fail(false);
   await ui.tap('shopping-catalog-save');assert.ok(ui.hosts.has('shopping-seven-orbits'));assert.equal(f.doc().items.length,1);assert.equal(f.doc().operations.length,1);await ui.close();ui=null;await f.disk.reopen();assert.equal((await f.open()).note.shopping.items.length,1);
  }finally{await ui?.close();f.disk.close();}
 });
 
 test('selected subgroup heading is shown once including frozen fish, and search retains distinct group context',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f,{startList:false});for(const [orbit,title] of [['protein','Pescado y marisco · Congelados'],['bakery','Panadería'],['produce','Frutas']]){await enter(ui,orbit,title);assert.equal(ui.hosts.get('shopping-catalog-heading').children,title);assert.equal(ui.container.textContent.split(title).length-1,1);assert.equal([...ui.hosts.keys()].some(id=>id.startsWith('shopping-catalog-group-heading-')),false);await ui.tap('shopping-back');await ui.tap('shopping-back');}
+  ui=await shoppingUI(f,{startList:false});for(const [orbit,title] of [['protein','Pescado y marisco · Congelados'],['bakery','Panadería y repostería'],['produce','Frutas']]){await enter(ui,orbit,title);assert.equal(ui.hosts.get('shopping-catalog-heading').children,title);assert.equal(ui.container.textContent.split(title).length-1,1);assert.equal([...ui.hosts.keys()].some(id=>id.startsWith('shopping-catalog-group-heading-')),false);await ui.tap('shopping-back');await ui.tap('shopping-back');}
   await ui.tap('shopping-search-open');await ui.run(()=>ui.hosts.get('shopping-product-search').onChangeText('merluza'));await ui.idle();assert.ok([...ui.hosts.keys()].some(id=>id.startsWith('shopping-catalog-group-heading-')));assert.equal(ui.hosts.get('shopping-catalog-heading').children,'Buscar producto');
  }finally{await ui?.close();f.disk.close();}
 });
 
 test('favorite contact cannot claim the category swipe or trigger selection; choosing by name still supports the existing gesture',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería');const swipe=()=>ui.hosts.get(row+'-swipe');await ui.run(()=>ui.hosts.get(row+'-favorite').onPressIn());assert.equal(swipe().onMoveShouldSetPanResponder({}, {dx:90,dy:0}),false);await ui.tap(row+'-favorite');assert.equal(ui.hosts.get(row).accessibilityState.checked,false);
+  ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería y repostería');const swipe=()=>ui.hosts.get(row+'-swipe');await ui.run(()=>ui.hosts.get(row+'-favorite').onPressIn());assert.equal(swipe().onMoveShouldSetPanResponder({}, {dx:90,dy:0}),false);await ui.tap(row+'-favorite');assert.equal(ui.hosts.get(row).accessibilityState.checked,false);
   await ui.run(()=>{ui.hosts.get(row).onPressIn();swipe().onTouchStart();});assert.equal(swipe().onMoveShouldSetPanResponder({}, {dx:90,dy:0}),true);await ui.run(()=>{swipe().onPanResponderGrant();swipe().onPanResponderRelease({}, {dx:90,dy:0});});await ui.idle();assert.equal(ui.hosts.get(row).accessibilityState.checked,true);assert.equal(f.doc().items[0].favorite,true);assert.equal(f.doc().items[0].selected,false);
  }finally{await ui?.close();f.disk.close();}
 });

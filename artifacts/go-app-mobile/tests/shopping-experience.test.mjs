@@ -44,7 +44,7 @@ test('finish snapshots the real bought items without deleting catalog, observati
 });
 
 test('eight presentation entrances preserve all legacy storage keys and disjoint orbit targets',()=>{
- assert.deepEqual(plain(x.SHOPPING_ENTRANCES.map(o=>o.label)),['FRUTAS Y VERDURAS','CARNICERÍA Y PESCADERÍA','BEBIDAS','PANADERÍA Y PASTAS','LÁCTEOS Y REFRIGERADOS','DESPENSA','HIGIENE Y PERFUMERÍA','OTROS (HOGAR)']);
+ assert.deepEqual(plain(x.SHOPPING_ENTRANCES.map(o=>o.label)),['FRUTAS Y VERDURAS','CARNICERÍA Y PESCADERÍA','BEBIDAS','PANADERÍA Y REPOSTERÍA','LÁCTEOS Y REFRIGERADOS','ALIMENTOS','HIGIENE Y PERFUMERÍA','OTROS (HOGAR)']);
  assert.equal(m.SHOPPING_CATEGORIES.length,12,'storage retains all twelve legacy categories');
  for(const width of [320,375,390,430,768])for(const scale of [1,1.8,2]){const l=x.shoppingOrbitLayout(width,scale);
   assert.equal(l.points.length,7);assert.equal(l.buttonHeight,l.button);assert.ok(l.height<=l.size);
@@ -78,7 +78,7 @@ test('GO executes bounded commands on the same document; ambiguous presentations
 });
 
 test('catalog preserves owner group order, search and distinct fresh/frozen products',()=>{
- const pantry=catalog.shoppingCatalogGroups('pantry');assert.deepEqual(plain(pantry.map(g=>g.label)),['Galletas y repostería','Arroz y cereales','Legumbres','Conservas','Aceites, salsas y condimentos','Desayuno y dulces']);assert.ok(catalog.shoppingCatalogGroups('bakery').some(g=>g.label==='Panadería'));
+ const pantry=catalog.shoppingCatalogGroups('pantry');assert.deepEqual(plain(pantry.map(g=>g.label)),['Arroz, pasta y cereales','Legumbres','Conservas','Aceites, salsas y condimentos','Desayuno','Preparados · Congelados']);assert.ok(catalog.shoppingCatalogGroups('bakery').some(g=>g.label==='Panadería y repostería'));
  assert.deepEqual(plain(catalog.shoppingCatalogGroups("bakery")[0].products.slice(0,4)),['Pan común','Barra de pan','Baguette','Pan integral']);
  assert.equal(catalog.shoppingCatalogGroups('search','salmón').length,2);
  const f=fixture(),fresh=f.add('Salmón',{category:'fish'}),frozen=f.add('Salmón',{category:'frozen'});

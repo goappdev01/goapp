@@ -1,11 +1,11 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
 import {shoppingFixture,shoppingUI} from './helpers/shopping-fixture.mjs';
 const h=createRequire(import.meta.url)('./helpers/unified-note-fixture.cjs'),m=h.load('lib/shoppingNote.ts'),taxonomy=h.load('lib/shoppingTaxonomy.ts',{'./shoppingNote':m}),catalog=h.load('lib/shoppingCatalog.ts',{'./shoppingNote':m,'./shoppingTaxonomy':taxonomy}),experience=h.load('lib/shoppingExperience.ts',{'./shoppingNote':m,'./shoppingTaxonomy':taxonomy});
-const expected=['FRUTAS Y VERDURAS','CARNICERÍA Y PESCADERÍA','BEBIDAS','PANADERÍA Y PASTAS','LÁCTEOS Y REFRIGERADOS','DESPENSA','HIGIENE Y PERFUMERÍA','OTROS (HOGAR)'];
+const expected=['FRUTAS Y VERDURAS','CARNICERÍA Y PESCADERÍA','BEBIDAS','PANADERÍA Y REPOSTERÍA','LÁCTEOS Y REFRIGERADOS','ALIMENTOS','HIGIENE Y PERFUMERÍA','OTROS (HOGAR)'];
 test('eight exact entrances and every original product/presentation survives a read-only mapping, including frozen and review',()=>{
  assert.deepEqual(h.plain(experience.SHOPPING_ENTRANCES.map(o=>o.label)),expected);
  const keys=groups=>groups.flatMap(g=>g.products.map(name=>g.category+':'+name)).sort();assert.deepEqual(keys(catalog.SHOPPING_CATALOG),keys(catalog.LEGACY_SHOPPING_CATALOG));
- for(const [name,category,orbit] of [['Manzanas','produce','produce'],['Pollo','meat','protein'],['Agua mineral','drinks','drinks'],['Bizcochos','pantry','pantry'],['Leche entera','dairy','dairy'],['Arroz blanco','pantry','pantry'],['Detergente de ropa','cleaning','home'],['Bombillas','cleaning','home'],['Merluza','frozen','protein'],['Menestra','frozen','produce'],['Helado','frozen','dairy'],['Tartas congeladas','frozen','dairy']])assert.equal(taxonomy.shoppingEntrance(name,category),orbit);
+ for(const [name,category,orbit] of [['Manzanas','produce','produce'],['Pollo','meat','protein'],['Agua mineral','drinks','drinks'],['Bizcochos','pantry','bakery'],['Leche entera','dairy','dairy'],['Arroz blanco','pantry','pantry'],['Detergente de ropa','cleaning','home'],['Bombillas','cleaning','home'],['Merluza','frozen','protein'],['Menestra','frozen','produce'],['Helado','frozen','dairy'],['Tartas congeladas','frozen','bakery']])assert.equal(taxonomy.shoppingEntrance(name,category),orbit);
  assert.equal(taxonomy.shoppingEntrance('Congelado desconocido','frozen'),undefined);assert.ok(catalog.shoppingCatalogGroups('review').some(g=>g.products.includes('Croquetas')));
  assert.ok(catalog.shoppingCatalogGroups('protein').some(g=>g.category==='frozen'&&g.label.includes('Congelados')));
  const doc=m.emptyShopping(),before=JSON.stringify(doc);catalog.shoppingCatalogGroups('produce');catalog.shoppingPersonalCatalog([{id:'a',items:doc.items}],'home');assert.equal(JSON.stringify(doc),before);assert.equal(doc.categoryOrder.length,12);
@@ -14,10 +14,10 @@ for(const handedness of ['left','right'])test(`Landing ${handedness}: seven prin
  const f=await shoppingFixture();let ui;try{
   await f.open();await f.add('Arroz');ui=await shoppingUI(f,{startList:false,width:320,fontScale:1.4,handedness});
   for(const o of experience.SHOPPING_ORBITS)assert.equal(ui.hosts.get('shopping-orbit-'+o.id).accessibilityLabel,o.label);assert.ok(ui.hosts.has('shopping-orbit-favorites'));assert.ok(!ui.hosts.has('shopping-orbit-frozen'));assert.ok(!ui.hosts.has('shopping-add'));
-  const row=ui.hosts.get('shopping-primary-actions');assert.deepEqual(h.React.Children.toArray(row.children).map(c=>c.props.testID).filter(Boolean),['shopping-manage-lists','shopping-go','shopping-list']);assert.equal(row.style[1].flexDirection,'row');
+  const row=ui.hosts.get('shopping-primary-actions');assert.deepEqual(h.React.Children.toArray(row.children).map(c=>c.props.testID).filter(Boolean),['shopping-manage-lists','shopping-list']);assert.equal(row.style[1].flexDirection,'row');assert.equal(ui.hosts.has('shopping-go'),false);
   assert.equal(h.React.Children.toArray(ui.hosts.get('shopping-shortcut-row').children).length,1);assert.equal(ui.hosts.has('shopping-navigation-space'),false);
   await ui.tap('shopping-list');assert.ok(ui.hosts.has('shopping-add'));assert.ok(!ui.container.textContent.includes('Mis listas ›'));assert.equal(ui.hosts.get('shopping-active-list').onPress,undefined);
-  await ui.tap('shopping-add');await ui.tap('shopping-go');assert.ok(ui.hosts.has('shopping-command'));await ui.tap('shopping-back');await ui.tap('shopping-manage-lists');assert.ok(ui.hosts.has('shopping-list-create'));
+  await ui.tap('shopping-add');await ui.tap('shopping-go-orbit-hit');assert.ok(ui.hosts.has('shopping-command'));await ui.tap('shopping-back');await ui.tap('shopping-manage-lists');assert.ok(ui.hosts.has('shopping-list-create'));
  }finally{await ui?.close();f.disk.close();}
 });
 test('all eight submenus finish with OTRO; custom catalog saves independently, survives removal/reopen and can be used in another list',async()=>{
@@ -73,22 +73,22 @@ test('seven approved principal categories, two composed satellites and all 212 p
  assert.equal(catalog.SHOPPING_CATALOG.flatMap(g=>g.products).length,212);
  assert.equal(catalog.shoppingCatalogGroups('review').flatMap(g=>g.products).length,4);
  const bakery=catalog.shoppingCatalogGroups('bakery').flatMap(g=>g.products),pantry=catalog.shoppingCatalogGroups('pantry').flatMap(g=>g.products);
- for(const name of ['Macarrones','Espaguetis','Fideos','Lasaña']){assert.ok(bakery.includes(name));assert.ok(!pantry.includes(name));}
- for(const name of ['Galletas','Magdalenas','Croissants','Bollería','Bizcochos']){assert.ok(pantry.includes(name));assert.ok(!bakery.includes(name));}
- for(const name of ['Tallarines','Pasta alimenticia','Pasta integral','Fusilli'])assert.equal(taxonomy.shoppingEntrance(name,'pantry'),'bakery');
- assert.equal(taxonomy.shoppingEntrance('Pasta de dientes','care'),'care');assert.notEqual(taxonomy.shoppingEntrance('Pastas de té','bakery'),'bakery');
- const icon=experience.SHOPPING_ORBITS.find(o=>o.id==='bakery').art;assert.equal(icon,'🥖🍝');assert.ok(!icon.includes('🍪'));
+ for(const name of ['Macarrones','Espaguetis','Fideos','Lasaña']){assert.ok(pantry.includes(name));assert.ok(!bakery.includes(name));}
+ for(const name of ['Galletas','Magdalenas','Croissants','Bollería','Bizcochos']){assert.ok(bakery.includes(name));assert.ok(!pantry.includes(name));}
+ for(const name of ['Tallarines','Pasta alimenticia','Pasta fresca','Pasta integral','Fusilli'])assert.equal(taxonomy.shoppingEntrance(name,'pantry'),'pantry');
+ assert.equal(taxonomy.shoppingEntrance('Pasta de dientes','care'),'care');assert.equal(taxonomy.shoppingEntrance('Pastas de té','bakery'),'bakery');
+ const icon=experience.SHOPPING_ORBITS.find(o=>o.id==='bakery').art;assert.equal(icon,'🥖🧁');assert.equal(experience.SHOPPING_ORBITS.find(o=>o.id==='pantry').art,'🍚🥫');
  for(const o of experience.SHOPPING_ORBITS)assert.equal([...o.art].filter(c=>c.codePointAt(0)>0x1F000).length,2,'two category illustrations');
  const doc=m.emptyShopping(),before=JSON.stringify(doc);for(const item of [{name:'Macarrones',category:'pantry'},{name:'Galletas',category:'bakery'}]){const original=JSON.stringify(item);taxonomy.shoppingItemEntrance(item);assert.equal(JSON.stringify(item),original);}assert.equal(JSON.stringify(doc),before);
 });
 
-test('pasta selection reuses stored pantry identity, while cookies remain selectable in Despensa',async()=>{
+test('pasta selection reuses stored pantry identity, while cookies remain selectable in Panadería',async()=>{
  const f=await shoppingFixture();let ui;try{
   await f.open();const old=await f.add('Macarrones',{category:'pantry',catalogOnly:true});await f.run({type:'select',id:old.id,value:false});
-  ui=await shoppingUI(f,{startList:false});await ui.tap('shopping-orbit-bakery-hit');
-  const subgroup=[...ui.hosts].find(([id,p])=>id.startsWith('shopping-subgroup-')&&p.accessibilityLabel==='Pasta alimenticia');assert.ok(subgroup);await ui.tap(subgroup[0]);
-  await ui.tap('shopping-catalog-bakery-Macarrones');await ui.tap('shopping-catalog-save');const saved=f.doc().items.filter(i=>i.name==='Macarrones');assert.equal(saved.length,1);assert.equal(saved[0].id,old.id);assert.equal(saved[0].category,'pantry');assert.equal(saved[0].selected,true);
-  await ui.tap('shopping-orbit-pantry-hit');
-  const cookies=[...ui.hosts].find(([id,p])=>id.startsWith('shopping-subgroup-')&&p.accessibilityLabel==='Galletas y repostería');assert.ok(cookies);await ui.tap(cookies[0]);assert.ok(ui.hosts.has('shopping-catalog-pantry-Galletas'));
+  ui=await shoppingUI(f,{startList:false});await ui.tap('shopping-orbit-pantry-hit');
+  const subgroup=[...ui.hosts].find(([id,p])=>id.startsWith('shopping-subgroup-')&&p.accessibilityLabel==='Arroz, pasta y cereales');assert.ok(subgroup);await ui.tap(subgroup[0]);
+  await ui.tap('shopping-catalog-pantry-Macarrones');await ui.tap('shopping-catalog-save');const saved=f.doc().items.filter(i=>i.name==='Macarrones');assert.equal(saved.length,1);assert.equal(saved[0].id,old.id);assert.equal(saved[0].category,'pantry');assert.equal(saved[0].selected,true);
+  await ui.tap('shopping-orbit-bakery-hit');
+  const cookies=[...ui.hosts].find(([id,p])=>id.startsWith('shopping-subgroup-')&&p.accessibilityLabel==='Panadería y repostería');assert.ok(cookies);await ui.tap(cookies[0]);assert.ok(ui.hosts.has('shopping-catalog-bakery-Galletas'));
  }finally{await ui?.close();f.disk.close();}
 });

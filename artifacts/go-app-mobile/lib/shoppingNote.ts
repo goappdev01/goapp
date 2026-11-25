@@ -1,9 +1,9 @@
 /** Local, versioned extension of NoteDocument. No remote catalogue or inferred package sizes. */
 export const SHOPPING_CATEGORIES = [
-  ["produce", "A", "Frutas y verduras"], ["bakery", "B", "Panadería y bollería"],
+  ["produce", "A", "Frutas y verduras"], ["bakery", "B", "Panadería y repostería"],
   ["meat", "C", "Carnicería y charcutería"], ["fish", "D", "Pescadería"],
   ["dairy", "E", "Lácteos y huevos"], ["frozen", "F", "Congelados"],
-  ["pantry", "G", "Despensa y alimentación seca"], ["drinks", "H", "Bebidas"],
+  ["pantry", "G", "Alimentos"], ["drinks", "H", "Bebidas"],
   ["care", "I", "Higiene y cuidado personal"], ["cleaning", "J", "Limpieza y hogar"],
   ["pets", "K", "Mascotas"], ["other", "L", "Otros / sin clasificar"],
 ] as const;

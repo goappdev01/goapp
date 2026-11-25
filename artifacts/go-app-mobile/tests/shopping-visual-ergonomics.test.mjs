@@ -35,7 +35,7 @@ test('narrow iPhone keeps one full-width search shortcut above the three fixed a
 
 test('IA form is compact, near the lower dock, keyboard-aware; command execution and voice start remain connected',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f,{startList:false});await ui.tap('shopping-go');
+  ui=await shoppingUI(f,{startList:false});await ui.tap('shopping-go-orbit-hit');
   assert.equal(ui.hosts.get('shopping-assistant-scroll').contentContainerStyle.justifyContent,'flex-end');
   assert.equal(ui.hosts.get('shopping-assistant-question').style.fontSize,16);assert.equal(ui.hosts.get('shopping-assistant-example').style.fontSize,13);
   assert.equal(style(ui.hosts.get('shopping-command').style).fontSize,14);assert.equal(ui.hosts.get('shopping-assistant-actions').style.flexDirection,'row');

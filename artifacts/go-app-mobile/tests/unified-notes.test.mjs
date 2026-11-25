@@ -244,7 +244,7 @@ test('COMPRAS shows long product names on their own row and keeps compact contro
 test('COMPRAS V1 editor exposes only product, integer quantity, presentation price, brand and save',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false});assert.ok(ui.hosts.has('shopping-eight-orbits'));assert.ok(ui.hosts.has('shopping-go-orbit'));assert.ok(ui.hosts.has('shopping-thumb-controls'));
-  assert.deepEqual(['produce','protein','drinks','bakery','dairy','pantry','care','home','favorites'].map(id=>ui.hosts.get('shopping-orbit-'+id).accessibilityLabel),['FRUTAS Y VERDURAS','CARNICERÍA Y PESCADERÍA','BEBIDAS','PANADERÍA Y REPOSTERÍA','LÁCTEOS Y REFRIGERADOS','DESPENSA','HIGIENE, DROGUERÍA Y PERFUMERÍA','OTROS (HOGAR)','FAVORITOS']);
+  assert.deepEqual(['produce','protein','drinks','bakery','dairy','pantry','care','home','favorites'].map(id=>ui.hosts.get('shopping-orbit-'+id).accessibilityLabel),['FRUTAS Y VERDURAS','CARNICERÍA Y PESCADERÍA','BEBIDAS','PANADERÍA Y REPOSTERÍA','LÁCTEOS Y REFRIGERADOS','ALIMENTOS','HIGIENE Y PERFUMERÍA','OTROS (HOGAR)','FAVORITOS']);
   await ui.tap('shopping-orbit-bakery');await ui.tap('shopping-subgroup-0');assert.ok(ui.hosts.has('shopping-catalog-bakery-Pan común'));await ui.tap('shopping-catalog-bakery-Pan común');await ui.tap('shopping-catalog-save');await ui.tap('shopping-list');await ui.tap('shopping-edit-'+f.doc().items[0].id);
   for(const key of ['name','quantity','price','brand'])assert.ok(ui.hosts.has('shopping-field-'+key));
   assert.match(ui.hosts.get("shopping-field-price").accessibilityLabel,/Precio por producto/);assert.ok(ui.hosts.has("shopping-save"));

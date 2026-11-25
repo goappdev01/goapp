@@ -11,21 +11,38 @@ export const LANDING_SATELLITE_DEGREES: Record<string, number> = {
   contacts: 67.5, messages: 112.5, settings: 157.5, payment: 157.5, mas: 202.5,
 };
 
-/** Place the cart in the open corner beside LIST and above FOOD. The two
- * existing controls remain fixed; their touch bounds determine the gap. */
-export function landingShoppingShortcut(scale: number, orbitRadius: number, orbitSize: number,
-  satelliteRadius: number, satelliteSize: number) {
+/** Only the cart size is new; all orbital centers and radii remain frozen. */
+export function landingShoppingShortcut(scale: number) {
   const visualSize = Math.max(34, Math.round(42 * scale));
   const touchSize = Math.max(44, visualSize);
-  const foodY = -orbitRadius * Math.SQRT1_2;
-  const listX = satelliteRadius * Math.cos(3 * Math.PI / 8);
-  const gap = 6;
-  const x = listX + Math.max(44, satelliteSize) / 2 + gap + touchSize / 2;
-  const y = foodY - Math.max(44, orbitSize) / 2 - gap - touchSize / 2;
-  return { x, y, touchSize, visualSize };
+  return { touchSize, visualSize };
 }
 
 type ShoppingRect = { x: number; y: number; width: number; height: number };
+/** Intersect the two circles whose radii include the cart and the measured
+ * clearance of LIST to its two neighbouring orbits. Choose the outer corner. */
+export function landingShoppingPreferred(list: ShoppingRect, reunion: ShoppingRect,
+  food: ShoppingRect, size: number, mirrored: boolean): ShoppingRect {
+  const center = (rect: ShoppingRect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+  const a = center(list), b = center(food), c = center(reunion);
+  const listRadius = list.width / 2, foodRadius = food.width / 2, cartRadius = size / 2;
+  const edgeGap = (other: ShoppingRect, point: { x: number; y: number }) =>
+    Math.hypot(point.x - a.x, point.y - a.y) - listRadius - other.width / 2;
+  const gap = Math.max(2, (Math.max(0, edgeGap(reunion, c)) + Math.max(0, edgeGap(food, b))) / 2);
+  const first = listRadius + cartRadius + gap, second = foodRadius + cartRadius + gap;
+  const dx = b.x - a.x, dy = b.y - a.y, distance = Math.hypot(dx, dy);
+  if (!distance) return { x: a.x + (mirrored ? -first : first) - cartRadius,
+    y: a.y - cartRadius, width: size, height: size };
+  const along = (first * first - second * second + distance * distance) / (2 * distance);
+  const across = Math.sqrt(Math.max(0, first * first - along * along));
+  const middleX = a.x + along * dx / distance, middleY = a.y + along * dy / distance;
+  const candidates = [
+    { x: middleX - across * dy / distance, y: middleY + across * dx / distance },
+    { x: middleX + across * dy / distance, y: middleY - across * dx / distance },
+  ];
+  const chosen = candidates.sort((left, right) => mirrored ? left.x - right.x : right.x - left.x)[0];
+  return { x: chosen.x - cartRadius, y: chosen.y - cartRadius, width: size, height: size };
+}
 /** Move only the new cart when a frozen orbit or floating close occupies its ideal spot. */
 export function fitLandingShoppingShortcut(preferred: ShoppingRect,
   bounds: { left: number; right: number; top: number; bottom: number },

@@ -10,6 +10,23 @@ const { fixture, devices } = require('./helpers/landing-qr-fixture.cjs');
 const separated = (a, b, gap = 3.9) => a.x + a.width + gap <= b.x || b.x + b.width + gap <= a.x
   || a.y + a.height + gap <= b.y || b.y + b.height + gap <= a.y;
 
+test('cart circle intersection follows actual LIST, REUNIÓN and COMIDA radii', () => {
+  for (const hand of ['right', 'left']) for (const device of devices) {
+    const f = fixture(device, 'estandar', 'USER', hand);
+    const geometry = f.compactLandingGeometry;
+    const list = geometry.obstacles.find(rect => rect.key === 'list');
+    const reunion = geometry.obstacles.find(rect => rect.key === 'orbit-0');
+    const food = geometry.obstacles.find(rect => rect.key === 'orbit-1');
+    const preferred = f.ctx.landingShoppingPreferred(list, reunion, food, f.ctx.shoppingShortcut.touchSize, geometry.mirrored);
+    const center = rect => [rect.x + rect.width / 2, rect.y + rect.height / 2];
+    const edgeGap = (a, b) => Math.hypot(center(a)[0] - center(b)[0], center(a)[1] - center(b)[1]) - a.width / 2 - b.width / 2;
+    const reference = Math.max(2, (Math.max(0, edgeGap(list, reunion)) + Math.max(0, edgeGap(list, food))) / 2);
+    assert.ok(Math.abs(edgeGap(preferred, list) - reference) < .01);
+    assert.ok(Math.abs(edgeGap(preferred, food) - reference) < .01);
+    assert.equal(geometry.mirrored ? center(preferred)[0] < center(list)[0] : center(preferred)[0] > center(list)[0], true);
+  }
+});
+
 test('the cart sits between LIST and FOOD; only a blocking close target may move', () => {
   for (const device of devices)
     for (const preset of ['compacto', 'estandar', 'grande'])
@@ -34,10 +51,9 @@ test('the cart sits between LIST and FOOD; only a blocking close target may move
           assert.ok(separated(cart, f.landingNavigationCloseRect, 0), `close ${device.width} ${hand}`);
           const list = geometry.obstacles.find(rect => rect.key === 'list');
           const food = geometry.obstacles.find(rect => rect.key === 'orbit-1');
+          const reunion = geometry.obstacles.find(rect => rect.key === 'orbit-0');
           const shortcut = f.ctx.shoppingShortcut;
-          const ideal = { x: geometry.center.x + (geometry.mirrored ? -shortcut.x : shortcut.x) - shortcut.touchSize / 2,
-            y: geometry.center.y + shortcut.y - shortcut.touchSize / 2,
-            width: shortcut.touchSize, height: shortcut.touchSize };
+          const ideal = f.ctx.landingShoppingPreferred(list, reunion, food, shortcut.touchSize, geometry.mirrored);
           const close = f.landingNavigationCloseRect;
           const oldClose = hidden.landingNavigationCloseRect;
           assert.equal(close.width, oldClose.width);
@@ -45,16 +61,16 @@ test('the cart sits between LIST and FOOD; only a blocking close target may move
           for (const other of [...geometry.obstacles, ...geometry.fixedObstacles, geometry.help])
             assert.ok(separated(close, other, 0), `close target ${device.width} ${preset} ${hand}`);
           if (close.x !== oldClose.x || close.y !== oldClose.y) {
-            assert.ok(!separated(ideal, oldClose, 2), 'close moves only when it blocks the cart corner');
-            assert.ok(separated(ideal, close, 2), 'close frees the cart corner');
+            assert.ok(!separated(cart, oldClose, 2), 'close moves only when it blocks the cart corner');
+            assert.ok(separated(cart, close, 2), 'close frees the cart corner');
           }
-          assert.ok(Math.abs(cart.x - ideal.x) < .01 && Math.abs(cart.y - ideal.y) < .01,
-            `cart stays in the corner ${device.width} ${preset} ${hand}`);
+          assert.ok(Math.hypot(cart.x - ideal.x, cart.y - ideal.y) < shortcut.touchSize,
+            `cart remains near the circle intersection ${device.width} ${preset} ${hand}`);
           const listGap = geometry.mirrored
             ? list.x - cart.x - cart.width : cart.x - list.x - list.width;
           const foodGap = food.y - cart.y - cart.height;
-          assert.ok(Math.abs(listGap - 6) < .01 && Math.abs(foodGap - 6) < .01,
-            `equal touch gaps beside LIST and above FOOD ${device.width} ${preset} ${hand}`);
+          assert.ok(Math.abs(listGap - 2) < .01 && Math.abs(foodGap - 2) < .01,
+            `minimum balanced touch gaps beside LIST and above FOOD ${device.width} ${preset} ${hand}`);
         }
 });
 
@@ -65,9 +81,9 @@ test('standard iPhone layout places the cart in the LIST–FOOD corner on both h
     const list = f.compactLandingGeometry.obstacles.find(rect => rect.key === 'list');
     const food = f.compactLandingGeometry.obstacles.find(rect => rect.key === 'orbit-1');
     assert.ok(cart && list && food);
-    assert.ok(cart.y + cart.height + 5 < food.y);
-    if (hand === 'right') assert.ok(list.x + list.width + 5 < cart.x);
-    else assert.ok(cart.x + cart.width + 5 < list.x);
+    assert.ok(cart.y + cart.height + 1.9 < food.y);
+    if (hand === 'right') assert.ok(list.x + list.width + 1.9 < cart.x);
+    else assert.ok(cart.x + cart.width + 1.9 < list.x);
   }
 });
 

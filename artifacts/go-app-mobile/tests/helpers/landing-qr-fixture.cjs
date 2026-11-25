@@ -16,7 +16,7 @@ const renderCode=transpile('resultButton='+expression.expression.getText(ast)+';
 const devices=[{width:320,height:568,insets:{top:20,bottom:0,left:0,right:0}},{width:375,height:667,insets:{top:20,bottom:0,left:0,right:0}},{width:390,height:844,insets:{top:47,bottom:34,left:0,right:0}},{width:430,height:932,insets:{top:59,bottom:34,left:0,right:0}},{width:844,height:390,insets:{top:0,bottom:21,left:44,right:44}}];
 function fixture(d,preset='estandar',profile='ADMIN',handedness='right',overrides={}){
  const scale=layout.fitLandingScale(preset,d.width,d.height,d.insets),orbitRadius=Math.round(99*scale),orbitBtnSize=Math.round(65*scale),microR=orbitRadius+Math.round(35*scale),microSz=Math.round(50*scale),goSize=Math.round(128*scale),orbitWrapSize=2*(orbitRadius+orbitBtnSize/2)+12,systemBoundingRadius=Math.max(orbitRadius+orbitBtnSize/2,microR+microSz/2),dockRight=preset==='estandar'?-1:5;
- const shoppingShortcut=layout.landingShoppingShortcut(scale,orbitRadius,orbitBtnSize,microR,microSz);
+ const shoppingShortcut=layout.landingShoppingShortcut(scale);
  const shoppingShortcutVisible=!overrides.supportMode&&!overrides.rutasMode&&(overrides.orbitSecondLevel??null)===null
   &&!overrides.reservasOrbitalOpen&&!overrides.anyOverlayOpen&&!overrides.categorySelected&&!overrides.otroSelected&&!overrides.isActivelyCreating;
  const dock=layout.landingDockBounds({...d,dockRight,boundingRadius:systemBoundingRadius,wrapSize:orbitWrapSize,satelliteRadius:microR,satelliteSize:microSz,visibleSatelliteKeys:Object.keys(layout.LANDING_SATELLITE_DEGREES),orbitRadius,orbitButtonSize:orbitBtnSize,orbitCount:8,orbitVisible:true,goSize});

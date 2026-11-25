@@ -28,7 +28,7 @@ for(const handedness of ['left','right'])test(`SVG circular control wiring ${han
   const favoriteContent=h.React.Children.toArray(ui.hosts.get('shopping-orbit-favorites').children);assert.equal(favoriteContent[0].props.pointerEvents,'box-none');const strings=node=>typeof node==='string'?[node]:h.React.isValidElement(node)?h.React.Children.toArray(node.props.children).flatMap(strings):[];assert.deepEqual(favoriteContent.flatMap(strings),['★','FAVORITOS']);assert.equal(ui.hosts.get('shopping-orbit-favorites').accessibilityLabel,'FAVORITOS');
   await ui.tap('shopping-orbit-favorites-hit');assert.ok(ui.hosts.has('shopping-products-scroll'));await ui.tap('shopping-back');await ui.tap('shopping-orbit-produce-hit');assert.ok(ui.hosts.has('shopping-new-product'));await ui.tap('shopping-back');
   assert.equal(JSON.stringify(f.doc()),before);assert.equal(ui.hosts.get('shopping-floating-buttons').style.flexDirection,'column');assert.equal(ui.hosts.has('shopping-navigation-space'),false);assert.equal(ui.hosts.has('shopping-add'),false);assert.ok(ui.hosts.has('shopping-search-open'));
-  assert.deepEqual(h.React.Children.toArray(ui.hosts.get('shopping-primary-actions').children).map(n=>n.props.testID).filter(Boolean),['shopping-manage-lists','shopping-go','shopping-list']);
+  assert.deepEqual(h.React.Children.toArray(ui.hosts.get('shopping-primary-actions').children).map(n=>n.props.testID).filter(Boolean),['shopping-manage-lists','shopping-list']);assert.equal(ui.hosts.has('shopping-go'),false);
   await ui.tap('shopping-go-orbit-hit');assert.ok(ui.hosts.has('shopping-command'));await ui.tap('shopping-back');await ui.tap('shopping-close');assert.ok(ui.calls.some(c=>c[0]==='close'));
  }finally{await ui?.close();f.disk.close();}
 });

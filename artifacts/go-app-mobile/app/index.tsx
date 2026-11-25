@@ -161,7 +161,7 @@ import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands"
 import { compactLandingOrbit, landingOrbitSafeBounds, redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
 import { splitLandingAppointments, landingPanelFrames, landingActionPanelFrames, landingActionsBesideNote, landingScrollPanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
 import { fitLandingScale, landingPresetScale, landingDockBounds, landingContentFrame,
-  landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom, LANDING_SATELLITE_DEGREES, landingShoppingShortcut, fitLandingShoppingShortcut } from "@/components/landing/landingResponsiveLayout";
+  landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom, LANDING_SATELLITE_DEGREES, landingShoppingShortcut, landingShoppingPreferred, fitLandingShoppingShortcut } from "@/components/landing/landingResponsiveLayout";
 import { LandingShoppingCart } from "@/components/landing/LandingShoppingCart";
 import {
   hasFullLandingArchitecture,
@@ -11906,7 +11906,7 @@ function HomeScreenContent() {
   // (orbitWrapSize) no cambia.
   const microR   = orbitRadius + Math.round(35 * uiScaleFactor);
   const microSz  = Math.round(50 * uiScaleFactor);
-  const shoppingShortcut = landingShoppingShortcut(uiScaleFactor, orbitRadius, orbitBtnSize, microR, microSz);
+  const shoppingShortcut = landingShoppingShortcut(uiScaleFactor);
   const shoppingShortcutVisible = !supportMode && !rutasMode && orbitSecondLevel === null
     && !reservasOrbitalOpen && !categorySelected && !otroSelected && !isActivelyCreating && !anyOverlayOpen;
   const systemBoundingRadius = Math.max(
@@ -14123,13 +14123,12 @@ function HomeScreenContent() {
     // On narrow screens the close target can occupy the only corner between LIST and COMIDA.
     // Reserve that corner when it is otherwise clear, moving only the close target if needed.
     const list = compactLandingGeometry.obstacles.find(rect => rect.key === "list");
+    const reunion = compactLandingGeometry.obstacles.find(rect => rect.key === "orbit-0");
     const food = compactLandingGeometry.obstacles.find(rect => rect.key === "orbit-1");
     const cartSize = shoppingShortcut.touchSize;
-    const cartCorner = shoppingShortcutVisible && compactLandingGeometry.fitted && list && food ? {
-      x: compactLandingGeometry.center.x + (compactLandingGeometry.mirrored ? -shoppingShortcut.x : shoppingShortcut.x) - cartSize / 2,
-      y: compactLandingGeometry.center.y + shoppingShortcut.y - cartSize / 2,
-      width: cartSize, height: cartSize,
-    } : null;
+    const cartCorner = shoppingShortcutVisible && compactLandingGeometry.fitted && list && reunion && food
+      ? fitLandingShoppingShortcut(landingShoppingPreferred(list, reunion, food, cartSize, compactLandingGeometry.mirrored),
+        compactLandingGeometry.bounds, obstacles, list, food) : null;
     const cornerFits = cartCorner && cartCorner.x >= bounds.x && cartCorner.y >= bounds.y
       && cartCorner.x + cartSize <= bounds.x + bounds.width && cartCorner.y + cartSize <= bounds.y + bounds.height
       && obstacles.every(rect => cartCorner.x + cartSize + 2 <= rect.x || rect.x + rect.width + 2 <= cartCorner.x
@@ -14146,13 +14145,11 @@ function HomeScreenContent() {
   const landingShoppingRect = (() => {
     if (!shoppingShortcutVisible || !compactLandingGeometry.fitted) return null;
     const list = compactLandingGeometry.obstacles.find(rect => rect.key === "list");
+    const reunion = compactLandingGeometry.obstacles.find(rect => rect.key === "orbit-0");
     const food = compactLandingGeometry.obstacles.find(rect => rect.key === "orbit-1");
-    if (!list || !food) return null;
+    if (!list || !reunion || !food) return null;
     const size = shoppingShortcut.touchSize;
-    const preferred = { x: compactLandingGeometry.center.x
-      + (compactLandingGeometry.mirrored ? -shoppingShortcut.x : shoppingShortcut.x) - size / 2,
-      y: compactLandingGeometry.center.y + shoppingShortcut.y - size / 2,
-      width: size, height: size };
+    const preferred = landingShoppingPreferred(list, reunion, food, size, compactLandingGeometry.mirrored);
     return fitLandingShoppingShortcut(preferred, compactLandingGeometry.bounds,
       [...compactLandingGeometry.obstacles, ...compactLandingGeometry.fixedObstacles,
         compactLandingGeometry.help, landingNavigationCloseRect], list, food);
