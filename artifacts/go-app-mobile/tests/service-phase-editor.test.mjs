@@ -26,7 +26,10 @@ async function fixture(service=tint(),{lang='es',resources=[],delay=false}={}){
  const scope={exports:{},React,useState:React.useState,useRef:React.useRef,useEffect:React.useEffect,useCallback:React.useCallback,...components,
   useBusinessConfig:()=>React.useContext(Context),useLanguage:()=>({lang,t:key=>translations[lang][key]??key}),...timing,...adapter,newTimingId:(()=>{let n=0;return()=>`new-${++n}`;})(),
   BLUE:'#1D4ED8',TEXT:'#111827',GRAY:'#374151',DIM:'#4B5563',RED:'#B91C1C',PURPLE:'#7E22CE',GREEN:'#166534',GOLD:'#C9A84C',c:{svcRow:serviceCardStyle,...presentationStyles},trSector:value=>value,Feather:native('Feather'),
-  CatalogAssociationManager:()=>null,BookingResourcesEditor:()=>null,GoOcrImportSheet:native('GoOcrImportSheet'),Haptics:{selectionAsync:async()=>{}},Alert:{alert:(...args)=>alerts.push(args)},
+  CatalogAssociationManager:()=>null,BookingResourcesEditor:()=>null,GoOcrImportSheet:native('GoOcrImportSheet'),
+  useServiceComplementCatalog:()=>({error:null}),ServiceAssociatedProducts:()=>null,CatalogPhotoButton:native('CatalogPhotoButton'),
+  isSharedCatalogPhotoReference:()=>false,isCatalogStorageReference:()=>false,
+  Haptics:{selectionAsync:async()=>{}},Alert:{alert:(...args)=>alerts.push(args)},
   ImagePicker:{requestMediaLibraryPermissionsAsync:async()=>({status:'granted'}),launchImageLibraryAsync:async()=>{imports.image++;return{canceled:true};}},DocumentPicker:{getDocumentAsync:async()=>{imports.pdf++;return{canceled:true};}},
  };
  vm.runInNewContext(compile(declarations.map(node=>node.getText(ast)).join('\n')+';exports.StepServicios=StepServicios;'),scope);
@@ -171,7 +174,7 @@ test('only service names are centered and remain editable and persisted without 
  }finally{await f.close();}
 });
 
-for(const lang of ['es','en'])test(lang+': exactly three spaced import buttons retain their icons, titles and original handlers without secondary explanations',async()=>{
+for(const lang of ['es','en'])test(lang+': three import choices preserve layout and unavailable OCR never opens private files',async()=>{
  const f=await fixture(tint(),{lang});try{
   const buttons=['image','pdf','web'].map(kind=>f.get('service-import-'+kind));assert.ok(buttons.every(button=>typeof button.onPress==='function'));
   const body=f.container.textContent;for(const key of ['biz_import_image_label','biz_import_pdf_label','biz_import_link_label'])assert.ok(body.includes(translations[lang][key]));
@@ -179,8 +182,8 @@ for(const lang of ['es','en'])test(lang+': exactly three spaced import buttons r
   assert.doesNotMatch(body,/GO detectará nombres, precios y duraciones automáticamente/);
   assert.equal(f.visible().filter(p=>p.native==='Feather'&&p.name==='camera').length,1);assert.equal(f.visible().filter(p=>p.native==='Feather'&&p.name==='file-text').length,1);assert.equal(f.visible().filter(p=>p.native==='Feather'&&p.name==='globe').length,1);
   assert.ok(buttons[0].style.borderWidth>0);assert.equal(buttons[0].style,buttons[1].style);assert.ok(presentationStyles.importBtnsRow.gap>=10);assert.ok(presentationStyles.importBtnsRow.marginHorizontal>0);assert.ok(presentationStyles.importUrlBtn.marginHorizontal>0);
-  await f.settle(()=>buttons[0].onPress());const menu=f.alerts.at(-1)[2];await f.settle(()=>menu.find(choice=>choice.text.includes('Galería')).onPress());assert.equal(f.imports.image,1);
-  await f.settle(()=>buttons[1].onPress());assert.equal(f.imports.pdf,1);
+  await f.settle(()=>buttons[0].onPress());assert.match(f.alerts.at(-1)[1],lang==='es'?/OCR autorizado/:/authorised OCR/);assert.equal(f.imports.image,0);
+  await f.settle(()=>buttons[1].onPress());assert.match(f.alerts.at(-1)[1],lang==='es'?/extractor autorizado/:/authorised extractor/);assert.equal(f.imports.pdf,0);
   await f.settle(()=>buttons[2].onPress());const sheet=f.visible().find(p=>p.native==='GoOcrImportSheet');assert.equal(sheet.visible,true);assert.equal(sheet.isUrl,true);assert.equal(sheet.sourceUri,null);
   await f.settle(()=>sheet.onClose());assert.equal(f.visible().find(p=>p.native==='GoOcrImportSheet').visible,false);assert.equal(f.calls.length,0,'Opening import options must not alter services');
  }finally{await f.close();}

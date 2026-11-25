@@ -43,8 +43,6 @@ import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
 import { adjacentDemoCompanyId } from "@/data/businessDemoCatalog";
 import { getBusinessDemoSetupState, ensureBusinessDemoStaffIds } from "@/data/businessDemoStore";
 import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
-import * as ImagePicker from "expo-image-picker";
-import * as DocumentPicker from "expo-document-picker";
 import { PlanoEmpresaScreen } from "@/components/booking/PlanoEmpresaScreen";
 import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
@@ -52,6 +50,7 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import QRCode from "react-native-qrcode-svg";
 import { GoOcrImportSheet } from "@/components/empresa/GoOcrImportSheet";
+import { confirmCatalogImport } from "@/data/catalogImport";
 import { ProfessionalGapPolicy } from "./ProfessionalGapPolicy";
 import { Step0Actividad } from "@/components/empresa/EmpresaSetupGuide";
 import { captureAuthIdentity, isAuthIdentityCurrent } from "@/lib/authSession";
@@ -2525,7 +2524,7 @@ function BookingResourcesEditor({ resources, services, onSave }: { resources: Bo
 }
 
 function StepServicios({ currentSector, saveRef }: { currentSector: Sector | null; saveRef?: StepSaveRef }) {
-  const { config, updateConfig, demo } = useBusinessConfig();
+  const { config, updateConfig, demo, waitForConfigSave, reloadConfig } = useBusinessConfig();
   const { t, lang } = useLanguage();
   const color = currentSector?.color ?? BLUE;
   const photoBusinessId = demo?.businessId ?? config.businessId;
@@ -2559,8 +2558,6 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
 
   // ── OCR import state ────────────────────────────────────────────────────────
   const [ocrVisible,   setOcrVisible]   = useState(false);
-  const [ocrSourceUri, setOcrSourceUri] = useState<string | null>(null);
-  const [ocrIsPdf,     setOcrIsPdf]     = useState(false);
   const [ocrIsUrl,     setOcrIsUrl]     = useState(false);
 
   const patchSvc = (id: string, patch: Partial<SavedService>) =>
@@ -2576,104 +2573,42 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     setLocalSvcs(prev => [...prev, { id: `svc_${Date.now()}`, name: "", duration: 30, price: 0, capacity: 1 }]);
   };
 
-  // ── OCR: launch image picker ────────────────────────────────────────────────
-  const launchImagePicker = async (useCamera: boolean) => {
-    if (demo) { blockDemoExternal(lang); return; }
-    try {
-      if (useCamera) {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== "granted") {
-          Alert.alert("Permiso denegado", "Necesitamos acceso a la cámara para fotografiar tu tarifa.");
-          return;
-        }
-      } else {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== "granted") {
-          Alert.alert("Permiso denegado", "Necesitamos acceso a la galería para seleccionar tu tarifa.");
-          return;
-        }
-      }
-
-      const result = useCamera
-        ? await ImagePicker.launchCameraAsync({
-            mediaTypes: ["images"],
-            quality: 0.85,
-            allowsEditing: true,
-          })
-        : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ["images"],
-            quality: 0.85,
-            allowsEditing: false,
-          });
-
-      if (!result.canceled && result.assets[0]) {
-        setOcrSourceUri(result.assets[0].uri);
-        setOcrIsPdf(false);
-        setOcrVisible(true);
-      }
-    } catch {
-      Alert.alert("Error", "No se pudo abrir la cámara. Inténtalo de nuevo.");
-    }
-  };
-
   const handleImageImport = () => {
     if (demo) { blockDemoExternal(lang); return; }
-    Haptics.selectionAsync().catch(() => {});
-    Alert.alert(
-      "Importar tarifa",
-      "¿Cómo quieres obtener la imagen de tu tarifa?",
-      [
-        { text: "📷  Cámara",  onPress: () => launchImagePicker(true)  },
-        { text: "🖼️  Galería", onPress: () => launchImagePicker(false) },
-        { text: t("biz_cancel"), style: "cancel" },
-      ]
-    );
+    Alert.alert(lang === "en" ? "Import unavailable" : "Importación no disponible",
+      lang === "en" ? "Reading photos needs an authorised OCR engine. GO will not access your camera or gallery or import anything."
+        : "La lectura de fotografías necesita un motor OCR autorizado. No se solicitará acceso a cámara o galería ni se importará nada.");
   };
 
   // ── OCR: launch PDF picker ──────────────────────────────────────────────────
   const handlePdfImport = async () => {
     if (demo) { blockDemoExternal(lang); return; }
-    Haptics.selectionAsync().catch(() => {});
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: "application/pdf",
-        copyToCacheDirectory: true,
-      });
-      if (!result.canceled && result.assets?.[0]) {
-        setOcrIsUrl(false);
-        setOcrSourceUri(result.assets[0].uri);
-        setOcrIsPdf(true);
-        setOcrVisible(true);
-      }
-    } catch {
-      Alert.alert("Error", "No se pudo abrir el selector de archivos.");
-    }
+    Alert.alert(lang === "en" ? "Import unavailable" : "Importación no disponible",
+      lang === "en" ? "Reading PDF needs an authorised extractor. GO will not access your document or import anything."
+        : "La lectura de PDF necesita un extractor autorizado. No se accederá al documento ni se importará nada.");
   };
 
   // ── OCR: launch URL import ──────────────────────────────────────────────────
   const handleUrlImport = () => {
     if (demo) { blockDemoExternal(lang); return; }
     Haptics.selectionAsync().catch(() => {});
-    setOcrSourceUri(null);
-    setOcrIsPdf(false);
     setOcrIsUrl(true);
     setOcrVisible(true);
   };
 
   // ── OCR: import confirmed services ──────────────────────────────────────────
-  const handleOcrImport = (newServices: SavedService[]) => {
-    const existing = localSvcs.filter(s => s.name.trim());
-    const merged: LocalSvc[] = [
-      ...existing,
-      ...newServices.map((s, i) => ({
-        ...s,
-        id:       `ocr_${Date.now()}_${i}`,
-        capacity: s.capacity ?? 1,
-      })),
-    ];
-    setLocalSvcs(merged);
+  const handleOcrImport = async (newServices: SavedService[]) => {
+    if (!config.businessId || !waitForConfigSave || !reloadConfig) throw new Error("Selecciona una empresa real antes de importar.");
+    await flushServices();
+    await waitForConfigSave(config.businessId);
+    const result = await confirmCatalogImport(config.businessId, newServices.map(service => ({
+      name: service.name, description: service.description ?? "", price: service.price,
+      duration: service.duration, capacity: 1,
+    })));
+    reloadConfig();
     setOcrIsUrl(false);
     setOcrVisible(false);
+    if (result.imported === 0) Alert.alert("Sin cambios", "Los servicios seleccionados ya están en el catálogo de esta empresa.");
   };
 
   return (
@@ -2822,9 +2757,10 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
       {/* OCR Review Sheet */}
       {!demo && <GoOcrImportSheet
         visible={ocrVisible}
-        sourceUri={ocrSourceUri}
-        isPdf={ocrIsPdf}
+        sourceUri={null}
+        isPdf={false}
         isUrl={ocrIsUrl}
+        businessId={config.businessId ?? ""}
         onClose={() => { setOcrVisible(false); setOcrIsUrl(false); }}
         onImport={handleOcrImport}
       />}

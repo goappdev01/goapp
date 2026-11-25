@@ -168,6 +168,7 @@ type GoBusinessConfigContextType = {
   loaded:             boolean;
   loadError?:         string;
   reloadConfig?:      () => void;
+  waitForConfigSave?: (businessId: string) => Promise<void>;
   updateConfig:       (patch: Partial<BusinessConfig>, expectedBusinessId?: string) => void;
   resetToSubActivity: (sectorId: string, subId: string) => void;
   resetConfig:        () => Promise<void>;
@@ -863,6 +864,20 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
     });
   }, []);
 
+  // An import must never race the normal debounced configuration writer.
+  const waitForConfigSave = useCallback(async (businessId: string) => {
+    const expectedRevision = revision.current;
+    for (let attempt = 0; attempt < 80; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      await syncQueue.current;
+      if (selectedBusinessId !== businessId || configRef.current.businessId !== businessId)
+        throw new Error("La empresa seleccionada cambió durante la importación.");
+      if (revision.current !== expectedRevision) throw new Error("La configuración cambió durante la importación. Revísala y vuelve a intentar.");
+      if (!dirty.current) return;
+    }
+    throw new Error("La configuración todavía no se ha guardado en Supabase. Reintenta cuando termine el guardado.");
+  }, [selectedBusinessId]);
+
   // ── resetToSubActivity ───────────────────────────────────────────────────────
 
   const resetToSubActivity = useCallback((sectorId: string, subId: string) => {
@@ -922,7 +937,7 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
 
   return (
     <GoBusinessConfigContext.Provider value={{ config: ready ? config : DEFAULT_BUSINESS_CONFIG, loaded: ready, loadError,
-      reloadConfig: () => setLoadAttempt(value => value + 1), updateConfig, resetToSubActivity, resetConfig, calendarWorkHours }}>
+      reloadConfig: () => setLoadAttempt(value => value + 1), waitForConfigSave, updateConfig, resetToSubActivity, resetConfig, calendarWorkHours }}>
       {children}
     </GoBusinessConfigContext.Provider>
   );
