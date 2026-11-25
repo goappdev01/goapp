@@ -11,7 +11,9 @@ function load(file,imports={}){const scope={exports:{},Intl,require:name=>{if(na
 const timing=load('data/serviceTiming.ts'),adapter=load('data/serviceWorkWait.ts',{'./serviceTiming':timing}),plain=x=>JSON.parse(JSON.stringify(x));
 function functions(file,names,globals={}){const source=readFileSync(file,'utf8'),ast=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),scope={exports:{},Intl,console,...globals};
  const declarations=names.map(name=>ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text===name));assert.ok(declarations.every(Boolean));vm.runInNewContext(compile(declarations.map(n=>n.getText(ast)).join('\n')+';'+names.map(n=>'exports.'+n+'='+n+';').join('')),scope);return scope.exports;}
-const bodies=functions('data/booking.ts',['serviceBody','mapRemoteService']);
+const bodies=functions('data/booking.ts',['serviceBody','mapRemoteService'],{
+ isCatalogReferenceSyntax:value=>typeof value==='string'&&/^demo-catalog:[a-z0-9-]{1,64}$/.test(value),BookingApiError:Error,
+});
 const draft=()=>adapter.updateServiceWorkWait({duration:30},['15','30','15'],[],randomUUID);
 const work=(id,minutes)=>({id,name:'',kind:'work',durationMinutes:minutes,resources:[]});
 test('settings serialize and reload 15+30+15 as 60 while strict admission still refuses unverified resources',()=>{

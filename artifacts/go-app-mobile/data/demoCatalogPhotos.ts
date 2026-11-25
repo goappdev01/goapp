@@ -57,6 +57,32 @@ const photos = {
   "verduras-plato": () => require("../assets/catalog-demo/verduras-plato.jpg"),
   "verduras-sarten": () => require("../assets/catalog-demo/verduras-sarten.jpg"),
   "salon-rulos": () => require("../assets/catalog-demo/salon-rulos.jpg"),
+  "tapas-surtidas": () => require("../assets/catalog-demo/tapas-surtidas.jpg"),
+  "arroz-marisco": () => require("../assets/catalog-demo/arroz-marisco.jpg"),
+  "pescado-parrilla": () => require("../assets/catalog-demo/pescado-parrilla.jpg"),
+  "pescado-gourmet": () => require("../assets/catalog-demo/pescado-gourmet.jpg"),
+  "ostras-limon": () => require("../assets/catalog-demo/ostras-limon.jpg"),
+  "cangrejo-plato": () => require("../assets/catalog-demo/cangrejo-plato.jpg"),
+  "marisco-gourmet": () => require("../assets/catalog-demo/marisco-gourmet.jpg"),
+  "ajo-blanco": () => require("../assets/catalog-demo/ajo-blanco.jpg"),
+  "bullit-ibiza": () => require("../assets/catalog-demo/bullit-ibiza.jpg"),
+  "guiso-carrero": () => require("../assets/catalog-demo/guiso-carrero.jpg"),
+  "desayuno-barcelona": () => require("../assets/catalog-demo/desayuno-barcelona.jpg"),
+  "desayuno-sevilla": () => require("../assets/catalog-demo/desayuno-sevilla.jpg"),
+  "desayuno-espanol": () => require("../assets/catalog-demo/desayuno-espanol.jpg"),
+  "roscon": () => require("../assets/catalog-demo/roscon.jpg"),
+  "dulces-bandeja": () => require("../assets/catalog-demo/dulces-bandeja.jpg"),
+  "pastel-platano": () => require("../assets/catalog-demo/pastel-platano.jpg"),
+  "verduras-salteadas": () => require("../assets/catalog-demo/verduras-salteadas.jpg"),
+  "arroz-gourmet": () => require("../assets/catalog-demo/arroz-gourmet.jpg"),
+  "corte-bob-espalda": () => require("../assets/catalog-demo/corte-bob-espalda.jpg"),
+  "corte-bob-clasico": () => require("../assets/catalog-demo/corte-bob-clasico.jpg"),
+  "corte-bob-corto": () => require("../assets/catalog-demo/corte-bob-corto.jpg"),
+  "trenza-cabello": () => require("../assets/catalog-demo/trenza-cabello.jpg"),
+  "corte-tijera": () => require("../assets/catalog-demo/corte-tijera.jpg"),
+  "corte-detalle": () => require("../assets/catalog-demo/corte-detalle.jpg"),
+  "corte-maquina": () => require("../assets/catalog-demo/corte-maquina.jpg"),
+  "alisado-plancha": () => require("../assets/catalog-demo/alisado-plancha.jpg"),
 } as const;
 type ExampleId = keyof typeof photos;
 
@@ -117,6 +143,32 @@ export const demoCatalogPhotoExamples: ReadonlyArray<{ id: ExampleId; title: str
   { id: "verduras-plato", title: "Verduras variadas", group: "Restaurantes", category: "Verduras" },
   { id: "verduras-sarten", title: "Verduras salteadas", group: "Restaurantes", category: "Verduras" },
   { id: "salon-rulos", title: "Rulos de peluquería", group: "Peluquerías", category: "Peinados" },
+  { id: "tapas-surtidas", title: "Tapas surtidas", group: "Restaurantes", category: "Tapas" },
+  { id: "arroz-marisco", title: "Arroz con marisco", group: "Restaurantes", category: "Arroces" },
+  { id: "pescado-parrilla", title: "Pescado a la parrilla", group: "Restaurantes", category: "Pescados" },
+  { id: "pescado-gourmet", title: "Pescado con guarnición", group: "Restaurantes", category: "Pescados" },
+  { id: "ostras-limon", title: "Ostras con limón", group: "Restaurantes", category: "Mariscos" },
+  { id: "cangrejo-plato", title: "Cangrejo preparado", group: "Restaurantes", category: "Mariscos" },
+  { id: "marisco-gourmet", title: "Marisco con guarnición", group: "Restaurantes", category: "Mariscos" },
+  { id: "ajo-blanco", title: "Ajo blanco", group: "Restaurantes", category: "Entrantes" },
+  { id: "bullit-ibiza", title: "Bullit de Ibiza", group: "Restaurantes", category: "Guisos" },
+  { id: "guiso-carrero", title: "Guiso casero", group: "Restaurantes", category: "Guisos" },
+  { id: "desayuno-barcelona", title: "Desayuno en Barcelona", group: "Restaurantes", category: "Desayunos" },
+  { id: "desayuno-sevilla", title: "Desayuno en Sevilla", group: "Restaurantes", category: "Desayunos" },
+  { id: "desayuno-espanol", title: "Desayuno español", group: "Restaurantes", category: "Desayunos" },
+  { id: "roscon", title: "Roscón", group: "Restaurantes", category: "Postres" },
+  { id: "dulces-bandeja", title: "Dulces variados", group: "Restaurantes", category: "Postres" },
+  { id: "pastel-platano", title: "Pastel de plátano", group: "Restaurantes", category: "Postres" },
+  { id: "verduras-salteadas", title: "Verduras salteadas", group: "Restaurantes", category: "Verduras" },
+  { id: "arroz-gourmet", title: "Arroz con guarnición", group: "Restaurantes", category: "Arroces" },
+  { id: "corte-bob-espalda", title: "Corte bob visto por detrás", group: "Peluquerías", category: "Cortes" },
+  { id: "corte-bob-clasico", title: "Corte bob clásico", group: "Peluquerías", category: "Cortes" },
+  { id: "corte-bob-corto", title: "Corte bob corto", group: "Peluquerías", category: "Cortes" },
+  { id: "trenza-cabello", title: "Trenza de cabello", group: "Peluquerías", category: "Peinados" },
+  { id: "corte-tijera", title: "Corte con tijera", group: "Peluquerías", category: "Cortes" },
+  { id: "corte-detalle", title: "Corte de precisión", group: "Peluquerías", category: "Cortes" },
+  { id: "corte-maquina", title: "Corte de cabello", group: "Peluquerías", category: "Cortes" },
+  { id: "alisado-plancha", title: "Alisado con plancha", group: "Peluquerías", category: "Alisados" },
 ];
 export type DemoCatalogPhotoGroup = "Todas" | "Peluquerías" | "Restaurantes";
 export function demoCatalogPhotoCategories(group: DemoCatalogPhotoGroup): string[] {
@@ -131,6 +183,11 @@ export function filterDemoCatalogPhotoExamples(group: DemoCatalogPhotoGroup, cat
 }
 export const demoCatalogExampleSource = (id: ExampleId): number => photos[id]();
 export const demoCatalogExampleReference = (id: ExampleId): string => `${EXAMPLE_PREFIX}${id}`;
+/** Bundled references are shared by DEMO and real businesses; never a remote URL. */
+export function isSharedCatalogPhotoReference(value: unknown): value is `demo-catalog:${string}` {
+  return typeof value === "string" && value.startsWith(EXAMPLE_PREFIX)
+    && Object.prototype.hasOwnProperty.call(photos, value.slice(EXAMPLE_PREFIX.length));
+}
 
 const demoTitlePhoto: Record<string, keyof typeof photos> = {
   "corte caballero": "corte-caballero", "corte senora": "corte-senora",
@@ -146,18 +203,20 @@ const demoSeedPhoto: Record<string, keyof typeof photos> = {
 };
 const normalize = (title: string) => title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 
-export function demoCatalogPhotoSource(item: Pick<BookableItem, "id" | "businessId" | "title" | "type" | "photoUri">): number | { uri: string } | undefined {
+export function catalogPhotoSource(item: Pick<BookableItem, "id" | "businessId" | "title" | "type" | "photoUri">): number | { uri: string } | undefined {
   const ownerDemo = item.businessId.startsWith("demo_business_");
   const bundledDemo = item.businessId.startsWith("demo_biz_") || item.businessId === "nemesi_molina";
-  if (!ownerDemo && !bundledDemo) return undefined;
   if (item.photoUri === "none") return undefined;
-  if (ownerDemo && item.photoUri?.startsWith(EXAMPLE_PREFIX)) {
+  if (isSharedCatalogPhotoReference(item.photoUri)) {
     const id = item.photoUri.slice(EXAMPLE_PREFIX.length);
-    return Object.prototype.hasOwnProperty.call(photos, id) ? photos[id as ExampleId]() : undefined;
+    return photos[id as ExampleId]();
   }
   if (ownerDemo && item.photoUri?.startsWith("data:image/jpeg;base64,")) return { uri: item.photoUri };
   if (ownerDemo && item.photoUri?.startsWith("data:image/png;base64,")) return { uri: item.photoUri };
   if (item.photoUri) return undefined;
+  if (!ownerDemo && !bundledDemo) return undefined;
   const photo = demoSeedPhoto[item.id] ?? (ownerDemo ? demoTitlePhoto[normalize(item.title)] : undefined);
   return photo ? photos[photo]() : undefined;
 }
+/** Compatibility for existing screens and stored DEMO references. */
+export const demoCatalogPhotoSource = catalogPhotoSource;

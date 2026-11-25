@@ -77,8 +77,8 @@ export function useServiceComplementCatalog(businessId: string | undefined, demo
 
 type CatalogController = ReturnType<typeof useServiceComplementCatalog>;
 
-function ProductRow({ id, serviceName, initialName, initialPrice, initialPhotoUri, demoBusinessId, onSave, onDelete }: {
-  id: string; serviceName: string; initialName?: string; initialPrice?: number; initialPhotoUri?: string; demoBusinessId?: string;
+function ProductRow({ id, serviceName, initialName, initialPrice, initialPhotoUri, photoBusinessId, demo, onSave, onDelete }: {
+  id: string; serviceName: string; initialName?: string; initialPrice?: number; initialPhotoUri?: string; photoBusinessId?: string; demo: boolean;
   onSave: (name: string, price: string, photoUri?: string) => Promise<void>; onDelete: () => Promise<void> | void;
 }) {
   const { lang } = useLanguage();
@@ -106,7 +106,7 @@ function ProductRow({ id, serviceName, initialName, initialPrice, initialPhotoUr
         value={name} editable={!saving} onChangeText={setName} onBlur={() => { void commit(); }} onSubmitEditing={() => { void commit(); }}
         placeholder={label("Producto", "Product")} placeholderTextColor="#6B7280" returnKeyType="done"
         style={{ flex: 1, minWidth: 72, minHeight: 44, color: "#111827", borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 9, paddingHorizontal: 9, backgroundColor: "#FFFFFF" }} />
-      {demoBusinessId && <CatalogPhotoButton id={id} businessId={demoBusinessId} title={name} type="product" photoUri={photoUri} demo
+      {photoBusinessId && <CatalogPhotoButton id={id} businessId={photoBusinessId} title={name} type="peluqueria" photoUri={photoUri} demo={demo}
         onChange={value => { latest.current = { ...latest.current, photoUri: value }; setPhotoUri(value); if (initialName !== undefined) return commit(); }} />}
       <TextInput accessibilityLabel={label("Precio de ", "Price for ") + (name.trim() || serviceName)}
         value={price} editable={!saving} onChangeText={setPrice} onBlur={() => { void commit(); }} onSubmitEditing={() => { void commit(); }}
@@ -178,11 +178,11 @@ export function ServiceAssociatedProducts({ serviceName, catalog, beforeSave }: 
     {edges.map(edge => {
       const item = catalog.items.find(row => row.id === edge.target_id)!;
       return <ProductRow key={edge.id} id={edge.id} serviceName={serviceName} initialName={item.title} initialPrice={item.price} initialPhotoUri={item.photoUri}
-        demoBusinessId={catalog.demo ? catalog.businessId : undefined}
+        photoBusinessId={catalog.businessId} demo={catalog.demo}
         onSave={(name, price, photoUri) => save(edge.id, null, name, price, photoUri)} onDelete={() => remove(edge)} />;
     })}
     {drafts.map(id => <ProductRow key={id} id={id} serviceName={serviceName}
-      demoBusinessId={catalog.demo ? catalog.businessId : undefined}
+      photoBusinessId={catalog.businessId} demo={catalog.demo}
       onSave={(name, price, photoUri) => save(null, id, name, price, photoUri)} onDelete={() => setDrafts(current => current.filter(value => value !== id))} />)}
     <TouchableOpacity testID="add-associated-product" accessibilityRole="button" accessibilityLabel={label("Añadir producto asociado a ", "Add associated product to ") + serviceName}
       onPress={() => setDrafts(current => [...current, `draft_${Date.now()}_${Math.random().toString(36).slice(2)}`])}

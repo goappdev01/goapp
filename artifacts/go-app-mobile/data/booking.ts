@@ -413,6 +413,10 @@ function mapRemoteBusiness(row: RemoteBusiness): Business {
   };
 }
 
+/** Public service metadata may contain only a bundled reference or an explicit removal. */
+function isCatalogReferenceSyntax(value: unknown): value is string {
+  return typeof value === "string" && /^demo-catalog:[a-z0-9-]{1,64}$/.test(value);
+}
 function mapRemoteService(row: RemoteService): BookableItem {
   return {
     id: row.id,
@@ -432,6 +436,8 @@ function mapRemoteService(row: RemoteService): BookableItem {
     active: row.active !== false,
     visible: row.ui_metadata?.visible ?? row.active !== false,
     timing: row.ui_metadata?.timing,
+    photoUri: isCatalogReferenceSyntax(row.ui_metadata?.photoUri) || row.ui_metadata?.photoUri === "none"
+      ? row.ui_metadata.photoUri : undefined,
   };
 }
 
@@ -593,10 +599,13 @@ export async function saveCloudConfiguration(businessId: string, payload: unknow
   await supabaseApiRequest(`${management}/businesses/${businessId}/configuration`, { method: "PUT", body: JSON.stringify({ payload }) }, true);
 }
 function serviceBody(item: Omit<BookableItem, "id">) {
+  if (item.photoUri !== undefined && item.photoUri !== "none" && !isCatalogReferenceSyntax(item.photoUri))
+    throw new BookingApiError("La fotografía del catálogo no es una imagen de ejemplo válida.", 400);
   const pending = item.timing?.configurationStatus === "pending" || item.catalogMetadata?.timingConfigurationPending === true
     || Object.values(item.timing?.professionalTimings ?? {}).some(timing => timing.configurationStatus === "pending");
   return { name: item.title, duration_minutes: item.durationMinutes, price: item.price, currency: "EUR", active: pending ? false : item.active,
-    ui_metadata: { ...item.catalogMetadata, description: item.description, type: item.type, catalogKind: item.catalogKind ?? "service", customerCapacity: item.customerCapacity, unitQuantity: item.unitQuantity, paymentRequired: item.paymentRequired, visible: item.visible, timingConfigurationPending: pending ? true : undefined, timing: pending ? undefined : item.timing } };
+    ui_metadata: { ...item.catalogMetadata, description: item.description, type: item.type, catalogKind: item.catalogKind ?? "service", customerCapacity: item.customerCapacity, unitQuantity: item.unitQuantity, paymentRequired: item.paymentRequired, visible: item.visible, timingConfigurationPending: pending ? true : undefined, timing: pending ? undefined : item.timing,
+      ...(item.photoUri !== undefined ? { photoUri: item.photoUri } : {}) } };
 }
 type RemoteStaff = { id: string; business_id: string; display_name: string; active: boolean; ui_metadata?: Partial<Staff> & { archived?: boolean } };
 const mapStaff = (r: RemoteStaff): Staff => ({ id: r.id, businessId: r.business_id, name: r.display_name, active: r.active, emoji: r.ui_metadata?.emoji, serviceIds: r.ui_metadata?.serviceIds, bookingBlocks: r.ui_metadata?.bookingBlocks, gapPolicy: r.ui_metadata?.gapPolicy });

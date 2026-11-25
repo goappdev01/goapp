@@ -71,7 +71,7 @@ const LEGACY_PLANTILLA_KEY  = "go_plantilla_items_v1";
 
 export type SavedService = {
   description?: string;
-  /** Local-only catalogue photo in DEMO; never submitted with real settings. */
+  /** Bundled example reference for any business; private data URI only in DEMO. */
   photoUri?: string;
   name:      string;
   duration:  number;
@@ -380,7 +380,9 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
   const name = cfg.businessName?.trim();
   if (!name) return selectedBusinessId;
   const bookingResources = cfg.bookingResources === undefined ? undefined : validateBookingResources(cfg.bookingResources);
-  const services = serializeServiceConfiguration(cfg.services, { resources: bookingResources ?? [] });
+  const configuredServices = cfg.services.filter(service => service.name.trim());
+  const services = serializeServiceConfiguration(cfg.services, { resources: bookingResources ?? [] })
+    .map((service, index) => ({ ...service, photoUri: configuredServices[index]?.photoUri }));
   // Validate before any remote write; an earlier closing time explicitly means next day.
   for (const day of cfg.activeDays) {
     const schedule = migrateDayScheduleEntry(cfg.daySchedules?.[String(day)] ?? { from: cfg.openFrom, to: cfg.openTo });
@@ -480,6 +482,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
           existing.durationMinutes  !== svc.duration          ||
           existing.price            !== svc.price             ||
           existing.customerCapacity !== (svc.capacity ?? 1) ||
+          (svc.photoUri !== undefined && existing.photoUri !== svc.photoUri) ||
           JSON.stringify(existing.timing) !== JSON.stringify(catalogueTiming) || existing.description !== svc.description;
         if (changed) {
           await saveBookableItem({
@@ -491,6 +494,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
             customerCapacity: svc.capacity ?? 1,
             timing: catalogueTiming,
             description: svc.description,
+            photoUri: svc.photoUri ?? existing.photoUri,
           });
         }
       } else {
@@ -508,6 +512,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
           visible:          true,
           timing:           catalogueTiming,
           description:      svc.description,
+          photoUri:         svc.photoUri,
         });
       }
     }

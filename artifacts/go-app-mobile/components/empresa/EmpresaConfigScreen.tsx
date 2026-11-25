@@ -87,6 +87,7 @@ import { BookingDepositSplitRow } from "./BookingDepositSplitRow";
 import { parsePartialBookingPercent } from "@/data/bookingServices";
 import { ServiceAssociatedProducts, useServiceComplementCatalog } from "./ServiceComplementManager";
 import { CatalogPhotoButton } from "./CatalogPhotoButton";
+import { isSharedCatalogPhotoReference } from "@/data/demoCatalogPhotos";
 import { isStableBookingId, serializeServiceConfiguration, validateBookingResources,
   validateBusinessTimezone, validateServiceTiming, type BookingResource } from "@/data/serviceTiming";
 import { readServiceWorkWait, serviceWorkWaitTotal, updateServiceWorkWait, type ServiceWorkWaitDraft } from "@/data/serviceWorkWait";
@@ -2526,14 +2527,16 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
   const { config, updateConfig, demo } = useBusinessConfig();
   const { t, lang } = useLanguage();
   const color = currentSector?.color ?? BLUE;
+  const photoBusinessId = demo?.businessId ?? config.businessId;
 
   type LocalSvc = SavedService & { id: string };
   const serializeServices = (svcs: LocalSvc[]) => svcs.filter(service => service.name.trim())
-    .map(({ name, description, duration, price, capacity, timing, photoUri }) => ({ name, duration, price, capacity, ...(description ? { description } : {}), ...(timing ? { timing } : {}), ...(demo && photoUri ? { photoUri } : {}) }));
+    .map(({ name, description, duration, price, capacity, timing, photoUri }) => ({ name, duration, price, capacity, ...(description ? { description } : {}), ...(timing ? { timing } : {}), ...((demo || isSharedCatalogPhotoReference(photoUri) || photoUri === "none") && photoUri ? { photoUri } : {}) }));
   const saveServices = useCallback((services: SavedService[]) => {
-    const checked = serializeServiceConfiguration(services, { resources: config.bookingResources ?? [] });
-    const withDemoPhotos = demo ? checked.map((service, index) => ({ ...service, ...(services[index]?.photoUri ? { photoUri: services[index].photoUri } : {}) })) : checked;
-    return demo ? demo.updateConfig({ services: withDemoPhotos }) : updateConfig({ services: checked });
+    const configuredServices = services.filter(service => service.name.trim());
+    const checked = serializeServiceConfiguration(configuredServices, { resources: config.bookingResources ?? [] });
+    const withPhotos = checked.map((service, index) => ({ ...service, ...(configuredServices[index]?.photoUri ? { photoUri: configuredServices[index].photoUri } : {}) }));
+    return demo ? demo.updateConfig({ services: withPhotos }) : updateConfig({ services: withPhotos });
   }, [demo, updateConfig, config.bookingResources]);
   const { draft: localSvcs, setValue: setLocalSvcs, flush } = useConfigArrayDraft<LocalSvc, SavedService>(
     config.services, services => services.length > 0
@@ -2691,7 +2694,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
               placeholderTextColor={DIM}
               returnKeyType="done"
             />
-            {!!demo && <CatalogPhotoButton id={svc.id} businessId={demo.businessId} title={svc.name} type={config.subId ?? ""} photoUri={svc.photoUri} demo onChange={value => patchSvc(svc.id, { photoUri: value })} />}</View>
+            {!!photoBusinessId && <CatalogPhotoButton id={svc.id} businessId={photoBusinessId} title={svc.name} type={config.subId ?? ""} photoUri={svc.photoUri} demo={!!demo} onChange={value => patchSvc(svc.id, { photoUri: value })} />}</View>
             {(config.subId !== "peluqueria" || svc.description !== undefined) && <TextInput style={[c.svcNameInput, { fontSize: 13 }]} value={svc.description ?? ""} onChangeText={description => patchSvc(svc.id, { description })}
               accessibilityLabel={config.subId === "peluqueria" ? (lang === "en" ? "Service description (optional)" : "Descripción del servicio (opcional)") : (lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)")}
               onBlur={() => { void flush().catch(() => {}); }} placeholder={config.subId === "peluqueria" ? (lang === "en" ? "Service description (optional)" : "Descripción del servicio (opcional)") : (lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)")} placeholderTextColor={DIM} />}

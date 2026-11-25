@@ -13,8 +13,27 @@ const load = (file,imports) => {const exports={};vm.runInNewContext(compile(file
 const photos=load("data/demoCatalogPhotos.ts",{});
 const names=["corte-caballero","corte-senora","tinte-coloracion","peinado-secado","mechas-tratamiento","paella-valenciana","tortilla-patatas","croquetas","patatas-bravas","gazpacho","churros-chocolate"];
 const titles=["Corte caballero","Corte señora","Tinte / coloración","Peinado y secado","Mechas / tratamiento","Paella valenciana","Tortilla de patatas","Croquetas","Patatas bravas","Gazpacho","Churros con chocolate"];
+function bookingPhotoFunctions(){
+  const file="data/booking.ts",source=readFileSync(file,"utf8"),ast=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
+  const names=["serviceBody","mapRemoteService"],declarations=names.map(name=>ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name));
+  assert.ok(declarations.every(Boolean));
+  const code=ts.transpileModule(declarations.map(node=>node.getText(ast)).join("\n")+"\n"+names.map(name=>`exports.${name}=${name};`).join("\n"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+  const exports={};vm.runInNewContext(code,{exports,isCatalogReferenceSyntax:value=>typeof value==="string"&&/^demo-catalog:[a-z0-9-]{1,64}$/.test(value),BookingApiError:Error});return exports;
+}
 
-test("original and added DEMO JPEGs are bundled locally and resolve only for DEMO companies",()=>{
+test("real catalogue stores only shared references in existing service metadata and reads them back",()=>{
+  const {serviceBody,mapRemoteService}=bookingPhotoFunctions(),reference=photos.demoCatalogExampleReference("salon-rulos");
+  const item={businessId:"business-1",title:"Peinado",type:"peluqueria",catalogKind:"service",durationMinutes:30,price:20,active:true,visible:true,photoUri:reference};
+  const body=serviceBody(item);assert.equal(body.ui_metadata.photoUri,reference);
+  const restored=mapRemoteService({id:"service-1",business_id:item.businessId,name:body.name,duration_minutes:body.duration_minutes,price:body.price,currency:"EUR",active:true,ui_metadata:body.ui_metadata});
+  assert.equal(restored.photoUri,reference);
+  assert.match(photos.catalogPhotoSource(restored),/salon-rulos/);
+  assert.equal(serviceBody({...item,photoUri:"none"}).ui_metadata.photoUri,"none");
+  assert.throws(()=>serviceBody({...item,photoUri:"data:image/jpeg;base64,/9j/PRIVATE"}),/imagen de ejemplo válida/);
+  assert.equal(mapRemoteService({...restored,business_id:item.businessId,name:item.title,duration_minutes:30,price:20,ui_metadata:{photoUri:"https://other.example/private.jpg"}}).photoUri,undefined);
+});
+
+test("original and added JPEGs resolve from one bundled library for DEMO and real companies",()=>{
   for(const name of names){const file=`assets/catalog-demo/${name}.jpg`,data=readFileSync(file);assert.equal(data[0],0xff);assert.equal(data[1],0xd8);assert.ok(statSync(file).size<150_000);}
   for(let i=0;i<names.length;i++) assert.match(photos.demoCatalogPhotoSource({id:`demo_business_owner_item_${i}`,businessId:"demo_business_owner",title:titles[i],type:i<5?"peluqueria":"restaurante"}),new RegExp(names[i]));
   const item={id:"demo_business_owner_service",businessId:"demo_business_owner",title:"Paella valenciana",type:"restaurante"};
@@ -24,8 +43,8 @@ test("original and added DEMO JPEGs are bundled locally and resolve only for DEM
   assert.equal(photos.demoCatalogPhotoSource({...item,title:"Sin foto"}),undefined);
   assert.equal(photos.demoCatalogPhotoSource({...item,photoUri:"https://example.com/other.jpg"}),undefined);
   assert.equal(photos.demoCatalogPhotoSource({...item,photoUri:"data:image/jpeg;base64,/9j/TEST"}).uri,"data:image/jpeg;base64,/9j/TEST");
-  assert.equal(photos.demoCatalogPhotoExamples.length,54);
-  assert.equal(new Set(photos.demoCatalogPhotoExamples.map(example=>example.id)).size,54);
+  assert.equal(photos.demoCatalogPhotoExamples.length,80);
+  assert.equal(new Set(photos.demoCatalogPhotoExamples.map(example=>example.id)).size,80);
   const sources=readFileSync("assets/catalog-demo/SOURCES.md","utf8");
   for(const example of photos.demoCatalogPhotoExamples){
     const file=`assets/catalog-demo/${example.id}.jpg`,data=readFileSync(file);
@@ -38,11 +57,14 @@ test("original and added DEMO JPEGs are bundled locally and resolve only for DEM
       assert.ok(sourceLine.includes(createHash("sha256").update(data).digest("hex")));
     }
   }
-  assert.equal(photos.demoCatalogPhotoExamples.filter(example=>example.group==="Restaurantes").length,42);
-  assert.equal(photos.demoCatalogPhotoExamples.filter(example=>example.group==="Peluquerías").length,12);
+  assert.equal(photos.demoCatalogPhotoExamples.filter(example=>example.group==="Restaurantes").length,60);
+  assert.equal(photos.demoCatalogPhotoExamples.filter(example=>example.group==="Peluquerías").length,20);
   for(let i=0;i<names.length;i++) assert.match(photos.demoCatalogPhotoSource({...item,title:"Otro servicio",photoUri:photos.demoCatalogExampleReference(names[i])}),new RegExp(names[i]));
   assert.equal(photos.demoCatalogPhotoSource({...item,photoUri:"demo-catalog:missing"}),undefined);
-  assert.equal(photos.demoCatalogPhotoSource({...item,businessId:"real-company",photoUri:photos.demoCatalogExampleReference("gazpacho")}),undefined);
+  assert.match(photos.catalogPhotoSource({...item,businessId:"real-company",photoUri:photos.demoCatalogExampleReference("gazpacho")}),/gazpacho/);
+  assert.equal(photos.catalogPhotoSource({...item,businessId:"real-company",photoUri:"data:image/jpeg;base64,/9j/TEST"}),undefined);
+  assert.equal(photos.isSharedCatalogPhotoReference("demo-catalog:gazpacho"),true);
+  assert.equal(photos.isSharedCatalogPhotoReference("demo-catalog:missing"),false);
 });
 
 test("DEMO photo control offers filtered local examples without requesting personal permissions",async()=>{
@@ -62,10 +84,10 @@ test("DEMO photo control offers filtered local examples without requesting perso
   const gallery=CatalogExampleGallery({visible:true,onSelect:value=>changes.push(value),onClose:()=>{open=false;}});
   assert.equal(gallery.props.visible,true);
   const list=nodes(gallery).find(node=>node.type==="flat-list");
-  assert.equal(list.props.data.length,54);
+  assert.equal(list.props.data.length,80);
   assert.equal(list.props.initialNumToRender,12);
   const choices=list.props.data.map(item=>list.props.renderItem({item}));
-  assert.equal(choices.length,54);
+  assert.equal(choices.length,80);
   assert.equal(nodes(gallery).filter(node=>node.type==="text").some(node=>node.props.children.includes("Peluquerías")),true);
   assert.equal(nodes(gallery).filter(node=>node.type==="text").some(node=>node.props.children.includes("Restaurantes")),true);
   for(const name of names)assert.ok(choices.some(node=>node.props.testID===`catalog-example-${name}`));
@@ -79,7 +101,12 @@ test("DEMO photo control offers filtered local examples without requesting perso
   button(CatalogPhotoButton({...props,photoUri:changes.at(-1)})).props.onPress();alerts.at(-1)[2][2].onPress();await new Promise(setImmediate);assert.deepEqual(calls,["gallery permission","gallery","camera permission","camera"]);
   alerts.at(-1)[2][3].onPress();await new Promise(setImmediate);assert.equal(changes.at(-1),"none");
   asset={base64:"/9j/PHOTO",mimeType:"image/png"};button(CatalogPhotoButton(props)).props.onPress();alerts.at(-1)[2][1].onPress();await new Promise(setImmediate);assert.match(alerts.at(-1)[1],/JPEG o PNG/);
-  assert.equal(button(CatalogPhotoButton({...props,demo:false})).props.disabled,true);
+  button(CatalogPhotoButton({...props,businessId:"real-company",demo:false})).props.onPress();
+  assert.deepEqual(Array.from(alerts.at(-1)[2],option=>option.text),["Imágenes de ejemplo","Cancelar"]);
+  assert.deepEqual(calls,["gallery permission","gallery","camera permission","camera","gallery permission","gallery"]);
+  button(CatalogPhotoButton({...props,businessId:"real-company",demo:false,photoUri:"demo-catalog:gazpacho"})).props.onPress();
+  assert.deepEqual(Array.from(alerts.at(-1)[2],option=>option.text),["Imágenes de ejemplo","Eliminar","Cancelar"]);
+  alerts.at(-1)[2][1].onPress();await new Promise(setImmediate);assert.equal(changes.at(-1),"none");
 });
 
 test("example search and category filters keep restaurant and hair photos separate",()=>{
@@ -106,5 +133,6 @@ test("client photo toggle keeps its device preference and leaves cards without i
   assert.equal(module.CatalogItemPhoto({...{item,enabled:false}}),null);
   assert.equal(module.CatalogItemPhoto({item:{...item,title:"Croquetas"},enabled:true}).type,"image");
   assert.match(module.CatalogItemPhoto({item:{...item,photoUri:"demo-catalog:churros-chocolate"},enabled:true}).props.source,/churros-chocolate/);
+  assert.match(module.CatalogItemPhoto({item:{...item,businessId:"real-company",photoUri:"demo-catalog:churros-chocolate"},enabled:true}).props.source,/churros-chocolate/);
   assert.equal(module.CatalogItemPhoto({item:{...item,photoUri:"demo-catalog:churros-chocolate"},enabled:false}),null);
 });

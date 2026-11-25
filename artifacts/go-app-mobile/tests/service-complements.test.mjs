@@ -165,6 +165,7 @@ test('a real company saves one optional association through the existing owned c
       if (operation === 'create') edges.push({ id: 'edge', business_id: businessId, source_id: input.sourceId, target_id: input.targetId, mode: input.mode, active: true, revision: 1 });
       return edges;
     } };
+  const photoButtons = new Map();
   const props = new Map(), native = name => value => { const id = React.useId(); props.set(id, { ...value, native: name });
     return React.createElement('div', { 'data-prop-id': id }, value.children); };
   const components = Object.fromEntries(['View', 'Text', 'TextInput', 'TouchableOpacity'].map(name => [name, native(name)]));
@@ -172,7 +173,7 @@ test('a real company saves one optional association through the existing owned c
     '@/data/booking': remote, '@/data/catalogAssociations': api, '@/data/demoBookingRepository': {},
     '@/contexts/GoBusinessConfigContext': { useBusinessConfig: () => ({ demo: null }) },
     '@/contexts/LanguageContext': { useLanguage: () => ({ lang: 'es' }) }, '@/lib/sessionEvents': { onSessionChanged: () => () => {} },
-    './CatalogPhotoButton': { CatalogPhotoButton: () => null } });
+    './CatalogPhotoButton': { CatalogPhotoButton: value => { photoButtons.set(value.id,value); return null; } } });
   function InlineProducts() {
     const owned = useServiceComplementCatalog(businessId, false, true);
     return React.createElement(ServiceAssociatedProducts, { serviceName: 'Corte', catalog: owned, beforeSave: async () => {} });
@@ -188,12 +189,16 @@ test('a real company saves one optional association through the existing owned c
   try {
     await settle(() => root.render(React.createElement(InlineProducts)));
     await press('Añadir producto asociado a Corte');
+    const draftId=[...photoButtons.keys()].find(id=>id.startsWith('draft_'));
+    assert.ok(draftId);assert.equal(photoButtons.get(draftId).demo,false);
+    await settle(()=>photoButtons.get(draftId).onChange('demo-catalog:salon-rulos'));
     await edit('Nombre del producto asociado de Corte', 'Ampolla'); await edit('Precio de Ampolla', '2,50');
     const price = visible().find(input => input.native === 'TextInput' && input.accessibilityLabel === 'Precio de Ampolla');
     await settle(() => price.onBlur());
     assert.equal(writes.length, 2);
     assert.equal(writes[0][0], 'product'); assert.equal(writes[0][1].price, 2.5);
     assert.equal(writes[0][1].durationMinutes, 0); assert.equal(writes[0][1].currency, 'EUR');
+    assert.equal(writes[0][1].photoUri,'demo-catalog:salon-rulos');
     assert.deepEqual(JSON.parse(JSON.stringify(writes[1])), ['association', 'create', { sourceId, targetId, mode: 'optional' }]);
     assert.equal(edges[0].sort_order, undefined);
   } finally { await settle(() => root.unmount()); }

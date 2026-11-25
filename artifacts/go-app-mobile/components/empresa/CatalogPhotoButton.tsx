@@ -3,7 +3,7 @@ import { Alert, FlatList, Modal, ScrollView, Text, TextInput, TouchableOpacity, 
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { demoCatalogExampleReference, demoCatalogExampleSource, demoCatalogPhotoCategories, demoCatalogPhotoSource, filterDemoCatalogPhotoExamples, type DemoCatalogPhotoGroup } from "@/data/demoCatalogPhotos";
+import { demoCatalogExampleReference, demoCatalogExampleSource, demoCatalogPhotoCategories, catalogPhotoSource, filterDemoCatalogPhotoExamples, type DemoCatalogPhotoGroup } from "@/data/demoCatalogPhotos";
 
 type Props = { id: string; businessId: string; title: string; type: string; photoUri?: string; demo: boolean; onChange: (value: string) => void | Promise<unknown> };
 
@@ -53,13 +53,13 @@ export function CatalogExampleGallery({ visible, onSelect, onClose, initialGroup
   </Modal>;
 }
 
-/** DEMO images remain in the existing isolated company document, never in the live API. */
+/** Example references work for every company. Private files remain DEMO-only until secure storage exists. */
 export function CatalogPhotoButton({ id, businessId, title, type, photoUri, demo, onChange }: Props) {
   const [examplesOpen, setExamplesOpen] = useState(false);
-  const source = demoCatalogPhotoSource({ id, businessId, title, type, photoUri });
+  const source = catalogPhotoSource({ id, businessId, title, type, photoUri });
   const applyPhoto = async (value: string) => {
     try { await onChange(value); }
-    catch (error) { Alert.alert("Fotografía", error instanceof Error ? error.message : "No se pudo guardar la fotografía DEMO."); }
+    catch (error) { Alert.alert("Fotografía", error instanceof Error ? error.message : "No se pudo guardar la fotografía."); }
   };
   const pick = async (camera: boolean) => {
     try {
@@ -75,11 +75,13 @@ export function CatalogPhotoButton({ id, businessId, title, type, photoUri, demo
       await applyPhoto(`data:${jpeg ? "image/jpeg" : "image/png"};base64,${encoded}`);
     } catch (error) { Alert.alert("Fotografía", error instanceof Error ? error.message : "No se pudo guardar la fotografía DEMO."); }
   };
-  return <View style={{ width: 48, height: 48 }}><TouchableOpacity testID={`catalog-photo-${id}`} accessibilityRole="button" accessibilityLabel={source ? "Cambiar fotografía DEMO" : "Añadir fotografía DEMO"} accessibilityState={{ disabled: !demo }} disabled={!demo}
-    onPress={() => Alert.alert("Fotografía DEMO", "Guardada solo en esta demostración", [
+  return <View style={{ width: 48, height: 48 }}><TouchableOpacity testID={`catalog-photo-${id}`} accessibilityRole="button" accessibilityLabel={source ? "Cambiar fotografía" : "Añadir fotografía"}
+    onPress={() => Alert.alert("Fotografía", demo ? "Guardada solo en esta demostración" : "Las imágenes de ejemplo se guardan con este servicio. Las fotos propias necesitan almacenamiento empresarial seguro.", [
       { text: "Imágenes de ejemplo", onPress: () => setExamplesOpen(true) },
-      { text: "Galería", onPress: () => { void pick(false); } },
-      { text: "Cámara", onPress: () => { void pick(true); } },
+      ...(demo ? [
+        { text: "Galería", onPress: () => { void pick(false); } },
+        { text: "Cámara", onPress: () => { void pick(true); } },
+      ] : []),
       ...(source ? [{ text: "Eliminar", style: "destructive" as const, onPress: () => { void applyPhoto("none"); } }] : []),
       { text: "Cancelar", style: "cancel" as const },
     ])}
