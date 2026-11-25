@@ -239,23 +239,27 @@ test('opened and listed actions share solid semantic surfaces and white labels',
    assert.equal(nodes(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0],n=>n.type==='Text')[0].props.style.color,'#181818');
   assert.equal(nodes(done,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0].props.style.backgroundColor,'#008754');
 });
-test('PENDIENTE uses readable yellow in selected and muted states while PROPONER remains orange',()=>{
+test('PENDIENTE is white directly on yellow in list and detail while PROPONER remains orange',()=>{
   const f=fixture(),c=f.load('components/GoEntryDetails.tsx');
-  const luminance=hex=>{const [r,g,b]=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return .2126*r+.7152*g+.0722*b;};
   for(const selected of [true,false]){
     const row=f.render(c.GoListActionRow,{actions:[{key:'pending',label:'PENDIENTE',tone:'pending',selectable:true,selected,onPress(){}}]});
     const button=nodes(row,n=>n.type==='TouchableOpacity')[0],text=nodes(button,n=>n.type==='Text')[0];
     assert.equal(button.props.style.backgroundColor,'#FACC15');
     assert.equal(text.props.style.color,'#FFFFFF');
-    assert.equal(text.props.style.backgroundColor,'#4A3800');
-    assert.ok((luminance(text.props.style.color)+.05)/(luminance(text.props.style.backgroundColor)+.05)>=4.5);
+    assert.equal(text.props.style.backgroundColor,undefined);
+    assert.equal(text.props.style.borderWidth,undefined);
+    assert.equal(text.props.style.paddingHorizontal,undefined);
+    assert.equal(text.props.style.textShadowColor,'#3b3000');
   }
   const landing=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'pending'},pendingYellow:true,onDone(){},onPending(){},onDiscard(){}});
   const landingPending=nodes(landing,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0];
   assert.equal(landingPending.props.style.backgroundColor,'#FACC15');
   const landingLabel=nodes(landingPending,n=>n.type==='Text')[0];
   assert.equal(landingLabel.props.style.color,'#FFFFFF');
-  assert.equal(landingLabel.props.style.backgroundColor,'#4A3800');
+  assert.equal(landingLabel.props.style.backgroundColor,undefined);
+  assert.equal(landingLabel.props.style.borderRadius,undefined);
+  assert.equal(landingLabel.props.style.paddingHorizontal,undefined);
+  assert.equal(landingLabel.props.style.textShadowColor,'#3b3000');
   const proposal=f.render(c.GoListActionRow,{actions:[{key:'propose',label:'PROPONER',tone:'intermediate',onPress(){}}]});
   assert.equal(nodes(proposal,n=>n.type==='TouchableOpacity')[0].props.style.backgroundColor,'#C25300');
 });

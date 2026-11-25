@@ -11,7 +11,7 @@ import { reservationCardPolicy, GO_ENTRY_COLORS as C } from "@/data/reservationC
 import { GoCloseButton } from "./ui/GoCloseButton";
 import { landingCurrentEntry } from "./landing/landingPanels";
 import { GoScreenCloseSurface, GoScreenCloseGuide } from "@/components/ui/GoScreenCloseSurface";
-import { GO_PENDING_ACTION_YELLOW, GO_PENDING_ACTION_LABEL_BG } from "../constants/colors";
+import { GO_PENDING_ACTION_YELLOW, GO_PENDING_ACTION_TEXT_SHADOW } from "../constants/colors";
 
 export function GoEntryCommunication({ entry }: { entry: GoEntry }) {
   const { lang } = useLanguage();
@@ -75,7 +75,7 @@ export function GoListActionRow({actions,handedness="right",scale=1,testID="list
           ...(action.selected?{borderWidth:2,borderColor:"#ffffff"}:{}),alignItems:"center",justifyContent:"center"}}>
         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.8}
           style={{color:action.tone==="pending"?"#FFFFFF":goActionTextColor(action.tone),fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",minWidth:0,
-            ...(action.tone==="pending"?{alignSelf:"center" as const,maxWidth:"100%" as const,backgroundColor:GO_PENDING_ACTION_LABEL_BG,borderRadius:3,paddingHorizontal:2,overflow:"hidden" as const}:{alignSelf:"stretch" as const,width:"100%" as const})}}>{action.label}{action.selected?" ✓":""}</Text>
+            alignSelf:"stretch",width:"100%",...(action.tone==="pending"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{action.label}{action.selected?" ✓":""}</Text>
       </TouchableOpacity>;
     })}
   </View>;
@@ -119,7 +119,7 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
         opacity:disabled?0.48:pressed===action.key?0.88:1,alignItems:"center",justifyContent:"center"}}>
       <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2}
         style={{color:pendingYellow&&action.key==="pending"?"#FFFFFF":goActionTextColor(action.tone),fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1,
-          ...(pendingYellow&&action.key==="pending"?{backgroundColor:GO_PENDING_ACTION_LABEL_BG,borderRadius:3,paddingHorizontal:2,overflow:"hidden" as const}:{})}}>{action.text}</Text>
+          ...(pendingYellow&&action.key==="pending"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{action.text}</Text>
     </TouchableOpacity>)}
   </View>;
 }

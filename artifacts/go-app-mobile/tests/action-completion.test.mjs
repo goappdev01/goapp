@@ -236,13 +236,20 @@ test("decision controls fit narrow iPhone and landscape widths with larger text,
  }
 });
 
-test("enabled status labels and the counter meet 4.5:1 text contrast",()=>{
+test("status labels remain legible without an inset PENDIENTE badge",()=>{
  const luminance=hex=>{const full=hex.length===4?'#'+[...hex.slice(1)].map(value=>value+value).join(''):hex;const rgb=full.slice(1).match(/../g).map(value=>parseInt(value,16)/255).map(value=>value<=.04045?value/12.92:((value+.055)/1.055)**2.4);return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};
  const contrast=(a,b)=>{const x=luminance(a),y=luminance(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
  const card=byId(confirmationView().render(),"completion-inline-card"),fills=[];
  for(const label of ["REALIZADO","PENDIENTE","PROPONER CAMBIO"]){
   const button=byLabel(card,label),text=viewNodes(button,node=>node.type==="Text")[0];fills.push(button.props.style.backgroundColor);
-  assert.ok(contrast(text.props.style.color,text.props.style.backgroundColor??button.props.style.backgroundColor)>=4.5,label);
+  if(label==="PENDIENTE"){
+   assert.equal(text.props.style.color.toLowerCase(),"#ffffff");
+   assert.equal(text.props.style.backgroundColor,undefined);
+   assert.equal(text.props.style.borderWidth,undefined);
+   assert.equal(text.props.style.paddingHorizontal,undefined);
+   assert.equal(text.props.style.textShadowColor,"#3b3000");
+   assert.ok(text.props.style.textShadowRadius>=2);
+  }else assert.ok(contrast(text.props.style.color,text.props.style.backgroundColor??button.props.style.backgroundColor)>=4.5,label);
  }
  assert.equal(new Set(fills).size,3);const counter=byId(card,"completion-counter");
  assert.ok(contrast(counter.props.style.color,counter.props.style.backgroundColor??card.props.style.backgroundColor)>=4.5);

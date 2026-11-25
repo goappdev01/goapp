@@ -1,6 +1,12 @@
 export const GO_PENDING_YELLOW = "#FFD700";
 export const GO_PENDING_ACTION_YELLOW = "#FACC15";
-export const GO_PENDING_ACTION_LABEL_BG = "#4A3800";
+// White lettering sits directly on yellow. A small glyph shadow aids reading
+// without creating an inset badge or changing the button's dimensions.
+export const GO_PENDING_ACTION_TEXT_SHADOW = {
+  textShadowColor: "#3b3000",
+  textShadowOffset: { width: 0, height: 1 },
+  textShadowRadius: 2,
+} as const;
 
 const colors = {
   light: {

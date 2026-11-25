@@ -107,7 +107,9 @@ test('real confirmation buttons dispatch exactly one personal decision or open t
  const pending=choices.find(n=>n.props.accessibilityLabel==='PENDIENTE');
  assert.equal(pending.props.style.backgroundColor,'#FACC15');
  assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.color.toUpperCase(),'#FFFFFF');
- assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.backgroundColor,'#4A3800');
+ assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.backgroundColor,undefined);
+ assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.paddingHorizontal,undefined);
+ assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.textShadowColor,'#3b3000');
  assert.deepEqual(calls,[['one','done'],['one','pending']]);assert.deepEqual(ui.calls,[['propose','one']]);assert.equal(e.changeProposal,undefined);
 });
 test('multiple unresolved/pending actions are reviewed individually and never disappear on a tab or close',()=>{

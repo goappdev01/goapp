@@ -5,7 +5,7 @@ import type {useActionCompletion} from "@/hooks/useActionCompletion";
 import type {CompletionEntry} from "@/lib/goActionCompletion";
 import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import {completionKey} from "@/lib/goActionCompletion";
-import {GO_PENDING_ACTION_YELLOW,GO_PENDING_ACTION_LABEL_BG} from "@/constants/colors";
+import {GO_PENDING_ACTION_YELLOW,GO_PENDING_ACTION_TEXT_SHADOW} from "@/constants/colors";
 type Model=ReturnType<typeof useActionCompletion>;
 export type CompletionFrame={x:number;y:number;width:number;height:number};
 /** Clear separation from the rendered global outline, independent of text and UI scale. */
@@ -95,7 +95,7 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
       onPress={()=>{if(action.status==="change"){setExpanded(false);onPropose(entry);}else void model.decide(entry,action.status);}}
       style={{width:side,height:decisionHeight,minWidth:44,minHeight:44,borderRadius:14,borderWidth:1,borderColor:action.color,
        backgroundColor:action.background,alignItems:"center",justifyContent:"center",padding:4,opacity:model.isSaving?.(entry)?0.45:1}}>
-      <Text numberOfLines={action.status==="change"?2:1} adjustsFontSizeToFit minimumFontScale={0.85} style={{width:action.status==="pending"?undefined:"100%",maxWidth:"100%",color:action.ink,fontSize:12,fontWeight:"700",textAlign:"center",...(action.status==="pending"?{backgroundColor:GO_PENDING_ACTION_LABEL_BG,borderRadius:3,paddingHorizontal:2,overflow:"hidden" as const}:{})}}>{en?action.en:action.es}</Text>
+      <Text numberOfLines={action.status==="change"?2:1} adjustsFontSizeToFit minimumFontScale={0.85} style={{width:"100%",maxWidth:"100%",color:action.ink,fontSize:12,fontWeight:"700",textAlign:"center",...(action.status==="pending"?GO_PENDING_ACTION_TEXT_SHADOW:{})}}>{en?action.en:action.es}</Text>
      </TouchableOpacity>)}
    </View>
 
