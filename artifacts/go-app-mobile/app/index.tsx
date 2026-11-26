@@ -7775,17 +7775,22 @@ function HomeScreenContent() {
     await persistBookingProposal(entry,input,actor);
   };
   const openBookingProposal = (entry:GoEntry,actor:"customer"|"business"="customer",initial?:{dateISO:string;time:string}) => {
-    const open=()=>{
       try {
         const original = (actor === "customer" ? customerBookings.bookings : ownerDemo.demo?.getSnapshot().bookings ?? [])
           .find(booking => booking.id === entry.bookingId || booking.id === entry.reservationId);
+        const status = original?.status ?? entry.bookingServerStatus;
+        if (entry.deleted || entry.estado === "rechazado" || entry.bookingStatus === "cancelada"
+          || entry.bookingStatus === "completada" || status && !["PENDING", "CONFIRMED", "ACCEPTED"].includes(status)) {
+          throw Error(lang === "en" ? "This reservation is no longer active. Its history cannot be rescheduled."
+            : "Esta reserva ya no está activa. No se puede reprogramar su historial.");
+        }
         const selection = bookingChangeSelection(entry, original);
         if(actor === "business") selection.business.name = bCfg.businessName;
         const repository = proposalRepository(entry,actor);
-        setBookingProposal({entry,actor,dateISO:initial?.dateISO ?? entry.dateISO ?? formatISODate(getToday()),selection,repository});
-      } catch(error) { showBookingChangeError(error as Error); if(actor === "business") returnToBookingCompany(); }
-    };
-    if(actor==="business"){bookingReturnDateRef.current=entry.dateISO;setEmpresaOpen(false);setTimeout(open,350);}else open();
+        const open = () => setBookingProposal({entry,actor,dateISO:initial?.dateISO ?? entry.dateISO ?? formatISODate(getToday()),selection,repository});
+        if(actor==="business"){bookingReturnDateRef.current=entry.dateISO;setEmpresaOpen(false);setTimeout(open,350);}else open();
+        return true;
+      } catch(error) { showBookingChangeError(error as Error); return false; }
   };
   const dropBookingProposal = (entry:GoEntry, destination:{dateISO:string;time:string}, actor:"customer"|"business") => {
     // Dropping already chose the date/time. Only the explicit "Propose change"
@@ -13472,47 +13477,57 @@ function HomeScreenContent() {
   // small). Ambas presentan los mismos 4 atajos: Aquí, Tarde, +10m,
   // Cambiar — única fuente de verdad para color, etiqueta, icono y
   // handler. Si añadimos/quitamos un atajo, basta editar aquí.
-  const openEntryChange = (rawEntry: GoEntry, from: "landing" | "calendar" = "landing", afterDismiss = false) => {
+  const openEntryChange = (rawEntry: GoEntry, from: "landing" | "calendar" = "landing", afterDismiss = false,
+    validateChange?: () => string | null) => {
     const entry = entryIsInternal(rawEntry) ? rawEntry : landingCurrentEntry(rawEntry);
     if (!afterDismiss && landingDetailsId === entry.id && entry.kind === "sent" && ["TAREA", "TAREA_INTERNA"].includes(entry.type || "")
       && (isGoNoteReminderTarget(entry) || ["nota_interna", "nota_externa"].includes(entry.intentKey))) {
       noteEditAfterDetailsRef.current = entry;
       setNoteDetailCloseRequested(true);
-      return;
+      return true;
     }
     setLandingDetailsId(null);
-    if (entry.customerBooking) { openBookingProposal(entry); return; }
-    if (entry.businessBooking) { openBookingProposal(entry, "business"); return; }
+    if (entry.customerBooking) return openBookingProposal(entry);
+    if (entry.businessBooking) return openBookingProposal(entry, "business");
+    if (entry.reservationId) {
+      showBookingChangeError(Error(lang === "en" ? "Refresh this reservation to recover its company and participant details."
+        : "Actualiza esta reserva para recuperar su empresa y los datos del participante."));
+      return false;
+    }
     if (entry.kind === "sent" && ["TAREA", "TAREA_INTERNA"].includes(entry.type || "")
       && (isGoNoteReminderTarget(entry) || ["nota_interna", "nota_externa"].includes(entry.intentKey))) {
       const identity = noteIdentityRef.current;
       if (!identity.ready || !identity.scope || entry.ownerUserId !== identity.scope.userId
         || (entry.taskContext ?? entry.actionContext ?? "live:USER") !== identity.scope.context) {
-        showToast("No se puede verificar la cuenta y el contexto de esta nota.", "error"); return;
+        showToast("No se puede verificar la cuenta y el contexto de esta nota.", "error"); return false;
       }
       openUnifiedNote(entry);
-      return;
+      return true;
     }
     if (entryIsInternal(entry)) {
       const owner = entry.ownerUserId;
-      if (!owner) { showToast(lang === "en" ? "The task owner cannot be verified." : "No se puede verificar el propietario de la tarea.", "error"); return; }
+      if (!owner) { showToast(lang === "en" ? "The task owner cannot be verified." : "No se puede verificar el propietario de la tarea.", "error"); return false; }
       setCalOpen(true);
       calFlow.open({ startAt: "date", initialDateISO: entry.dateISO, initialDateDraft: entry.date,
         initialTime: entry.time, initialDuration: entry.duration, skipDuration: true,
-        validate: result => { const check = _validateProposalSlot(result.dateISO, result.time, entry); return check.valid ? null : check.reason || "Hora no disponible"; },
+        validate: result => { const issue = validateChange?.(); if (issue) return issue; const check = _validateProposalSlot(result.dateISO, result.time, entry); return check.valid ? null : check.reason || "Hora no disponible"; },
         onSave: result => {
+          const issue = validateChange?.(); if (issue) { Alert.alert("GO", issue); return; }
           void changeTask({ owner, command: internalEntryCommand("update", result.dateISO, result.time), entries: [entry] }, entry, result.time, true)
             .then(() => { if (from === "landing") setCalOpen(false); showToast(lang === "en" ? "Task updated" : "Tarea actualizada", "success"); })
             .catch(error => Alert.alert("GO", error.message));
         }, onCancel: () => { if (from === "landing") setCalOpen(false); } });
-      return;
+      return true;
     }
     currentReceivedIdRef.current = entry.id;
     proposalReturnRef.current = from;
     setCalOpen(true);
     calFlow.open({ startAt: "date", initialDateISO: entry.dateISO || formatISODate(getToday()), initialDateDraft: entry.date,
       initialTime: entry.time, initialDuration: entry.duration,
-      onSave: result => sendSuggestChangeFromCal(result), onCancel: () => { if (from === "landing") setCalOpen(false); } });
+      validate: () => validateChange?.() ?? null,
+      onSave: result => { const issue = validateChange?.(); if (issue) { Alert.alert("GO", issue); return; } sendSuggestChangeFromCal(result); },
+      onCancel: () => { if (from === "landing") setCalOpen(false); } });
+    return true;
   };
   const cancelEntryFromDetails = (entry: GoEntry) => {
     if (!entryIsInternal(entry)) {
@@ -14338,37 +14353,46 @@ function HomeScreenContent() {
           </Text>
         </TouchableOpacity>
   );
+  const openCompletionChange = (entry: CompletionEntry) => {
+    try {
+      const scope = actionCompletion.scope;
+      if (!scope || !actionCompletion.active(scope) || !ownedCompletionEntry(entry, scope)) {
+        throw Error(lang === "en" ? "The account and context of this action cannot be verified."
+          : "No se puede verificar la cuenta y el contexto de esta acción.");
+      }
+      // Completion projections can have different display IDs for the same reservation.
+      // Use the current, owned record, including its services and booking revision.
+      const current = actionCompletion.candidates.find(candidate =>
+        completionKey(candidate) === completionKey(entry) && ownedCompletionEntry(candidate, scope));
+      if (!current || completionSchedule(current) !== completionSchedule(entry)) {
+        throw Error(lang === "en" ? "The action has changed. Refresh its details."
+          : "La acción ha cambiado. Actualiza sus datos.");
+      }
+      if (!completionEligible(current) || actionCompletion.status(current) === "done") {
+        throw Error(lang === "en" ? "This action is no longer pending. Its history will be preserved."
+          : "Esta acción ya no está pendiente. Se conserva su historial.");
+      }
+      const validateChange = () => {
+        const latest = personalVisibilitySource.current.candidates.find(candidate =>
+          completionKey(candidate) === completionKey(entry) && ownedCompletionEntry(candidate, scope));
+        return !actionCompletion.active(scope) || !latest || !completionEligible(latest)
+          || completionSchedule(latest) !== completionSchedule(current)
+          ? (lang === "en" ? "The account or action has changed. Reopen its details."
+            : "La cuenta o la acción ha cambiado. Vuelve a abrir sus datos.") : null;
+      };
+      // Same entry point as the visit details: booking services/slots, note editor,
+      // internal task or activity calendar. Opening a draft never writes a proposal.
+      if (!openEntryChange(current, "landing", false, validateChange)) return false;
+      setLandingActionsOpen(false);
+      return true;
+    } catch (error) { showBookingChangeError(error as Error); return false; }
+  };
   const renderLandingActionCompletion = (frame: CompletionFrame) =>
     !anyOverlayOpen && !rutasMode && !goAuthOpen && authBootstrapComplete && <LandingActionCompletion
         model={actionCompletion} lang={lang} availableWidth={screen.width-insets.left-insets.right}
         frame={frame} visible={landingActionsOpen}
         onPendingList={()=>{setLandingActionsOpen(false);setListFilter("pendiente");setListOpen(true);}}
-        onPropose={entry=>{
-          setLandingActionsOpen(false);
-          const scope=actionCompletion.scope;if(!scope || !actionCompletion.active(scope))return;
-          const current=actionCompletion.candidates.find(candidate=>candidate.id===entry.id);
-          if(!current || completionSchedule(current)!==completionSchedule(entry))return;
-          if(entry.reservationId && (entry.customerBooking || entry.businessBooking || entry.demoLocal)){
-            openBookingProposal(entry,scope.context.includes(":BUSINESS")?"business":"customer");
-            return;
-          }
-          currentReceivedIdRef.current=entry.id;proposalReturnRef.current="landing";
-          setCalOpen(true);
-          calFlow.open({startAt:"date",initialDateISO:entry.dateISO,initialDateDraft:entry.date,
-            initialTime:entry.time,initialDuration:entry.duration,
-            onCancel:()=>setCalOpen(false),
-            onSave:r=>Alert.alert(lang==="en"?"Confirm change proposal":"Confirmar propuesta de cambio",
-              r.dateISO+" · "+r.time,[
-                {text:lang==="en"?"Cancel":"Cancelar",style:"cancel",onPress:()=>setCalOpen(false)},
-                {text:lang==="en"?"Confirm proposal":"Confirmar propuesta",onPress:async()=>{
-                  try{await assertTaskUser(scope.userId);}catch{setCalOpen(false);return;}
-                  if(!actionCompletion.active(scope)){setCalOpen(false);return;}
-                    const latest=actionCompletion.candidates.find(e=>e.id===entry.id);
-                    if(!latest || completionSchedule(latest)!==completionSchedule(entry)){Alert.alert("GO","La acción ha cambiado. Revisa sus datos.");setCalOpen(false);return;}
-                    sendSuggestChangeFromCal(r);
-                }}
-              ])});
-        }}/>;
+        onPropose={openCompletionChange}/>;
 
   if (!authBootstrapComplete || !modeLoaded) {
     return (

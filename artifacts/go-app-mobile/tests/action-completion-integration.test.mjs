@@ -127,6 +127,21 @@ test('Landing highlights only the persisted follow-up decision and keeps proposa
   assert.equal(proposal.props.style.backgroundColor,'#FF8C00');
  }
 });
+
+test('expanded iOS ACCIONES opens the proposal only after native dismissal, once; errors retain the panel',()=>{
+ const e=entry(),model={scope:S,doc:core.emptyCompletionDocument(S),candidates:[e],unresolved:[e],pending:[],selected:null,setSelected(){},decide(){},configure(){}};
+ for(const accepted of [true,false]){
+  const ui=uiFixture(model);ui.props.frame.height=44;
+  let attempts=0;ui.props.onPropose=()=>{attempts++;return accepted;};
+  let tree=ui.render();nodes(tree,n=>n.type==='TouchableOpacity'&&text(n).includes('Confirma tus acciones'))[0].props.onPress();
+  tree=ui.render();const modal=nodes(tree,n=>n.type==='Modal')[0];assert.equal(modal.props.visible,true);
+  const button=nodes(modal,n=>n.props.accessibilityLabel==='PROPONER CAMBIO')[0];
+  button.props.onPress();button.props.onPress();assert.equal(attempts,0,'do not present a second native modal during dismissal');
+  tree=ui.render();const dismissed=nodes(tree,n=>n.type==='Modal')[0];assert.equal(dismissed.props.visible,false);
+  dismissed.props.onDismiss();dismissed.props.onDismiss();assert.equal(attempts,1);
+  assert.equal(nodes(ui.render(),n=>n.type==='Modal')[0].props.visible,!accepted);
+ }
+});
 test('multiple unresolved/pending actions are reviewed individually and never disappear on a tab or close',()=>{
  const a=entry(),b=entry({id:'two'}),doc=core.emptyCompletionDocument(S),model={scope:S,doc,candidates:[a,b],unresolved:[a,b],pending:[],selected:null,setSelected:id=>model.selected=id,decide(){throw Error('No implicit response');},configure(){},busy:false};const ui=uiFixture(model);
  let tree=ui.render();nodes(tree,n=>n.props.accessibilityLabel==='Acción siguiente')[0].props.onPress();assert.equal(model.selected,'two');tree=ui.render();assert.equal(model.unresolved.length,2);

@@ -43,10 +43,11 @@ export function completionDecisionLayout(width:number,fontScale=1){
 /** This is a separate absolute information layer. It never participates in orbital/card layout. */
 export function LandingActionCompletion({model,frame,onPropose,onPendingList,lang="es",availableWidth,anchorAbove=false,onCompactHeight,visible}:{
  visible?:boolean;
- model:Model;frame:CompletionFrame;onPropose:(e:CompletionEntry)=>void;onPendingList:()=>void;lang?:string;availableWidth?:number;anchorAbove?:boolean;onCompactHeight?:(height:number)=>void;
+ model:Model;frame:CompletionFrame;onPropose:(e:CompletionEntry)=>boolean|void;onPendingList:()=>void;lang?:string;availableWidth?:number;anchorAbove?:boolean;onCompactHeight?:(height:number)=>void;
 }){
  const insets=useSafeAreaInsets();
  const [tab,setTab]=useState<"unresolved"|"pending">("unresolved"),[settings,setSettings]=useState(false),[expanded,setExpanded]=useState(false);
+ const proposalAfterDismiss=useRef<CompletionEntry|null>(null);
  const [hours,setHours]=useState("24"),[actionHours,setActionHours]=useState("24"),[duration,setDuration]=useState("60");
  const en=lang==="en",label=(es:string,english:string)=>en?english:es;
  const rows=tab==="pending"?model.pending:model.unresolved;
@@ -92,7 +93,12 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
    <View style={{flexDirection:"row",justifyContent:"space-between",gap:decisionGap}}>
     {([{status:"change",color:"#FF8C00",background:"#FF8C00",ink:"#ffffff",es:"PROPONER\nCAMBIO",en:"PROPOSE\nCHANGE"}, {status:"pending",color:"#f2ce6c",background:GO_PENDING_ACTION_YELLOW,ink:"#ffffff",es:"PENDIENTE",en:"PENDING"}, {status:"done",color:"#43b77a",background:GO_DONE_ACTION_GREEN,ink:"#ffffff",es:"REALIZADO",en:"DONE"}] as const).map(action=>{const followUp=model.status?.(entry),selected=action.status!=="change"&&followUp===action.status,inactive=action.status!=="change"&&!selected;return <TouchableOpacity key={action.status}
       accessibilityRole="button" accessibilityLabel={(en?action.en:action.es).replace("\n"," ")} disabled={model.isSaving?.(entry) ?? false}
-      onPress={()=>{if(action.status==="change"){setExpanded(false);onPropose(entry);}else void model.decide(entry,action.status);}}
+      onPress={()=>{if(action.status==="change"){
+        if(proposalAfterDismiss.current)return;
+        // iOS cannot present the next native flow while this modal is dismissing.
+        if(expanded && Platform.OS==="ios"){proposalAfterDismiss.current=entry;setExpanded(false);}
+        else if(onPropose(entry)!==false)setExpanded(false);
+      }else void model.decide(entry,action.status);}}
       style={{width:side,height:decisionHeight,minWidth:44,minHeight:44,borderRadius:14,borderWidth:selected?1.5:1,borderColor:selected?"#ffffff":action.color,
        backgroundColor:action.background,alignItems:"center",justifyContent:"center",padding:4,opacity:model.isSaving?.(entry)?0.45:1}}>
       {inactive&&<View pointerEvents="none" accessible={false} style={{...GO_FOLLOW_UP_UNSELECTED_FINISH,borderRadius:13}}/>}
@@ -143,7 +149,10 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
      onPress={()=>setExpanded(true)}><Text style={text}>{label("Confirma tus acciones","Confirm your actions")} · {model.unresolved.length+model.pending.length}</Text></TouchableOpacity>
     :<ScrollView testID="completion-inline-card" bounces={false} nestedScrollEnabled style={{...card,maxHeight:frame.height,flexGrow:0}} contentContainerStyle={{padding:8}}>{controls()}</ScrollView>}
   </View>
-  <Modal transparent visible={expanded} animationType="fade" onRequestClose={()=>setExpanded(false)}>
+  <Modal transparent visible={expanded} animationType="fade" onRequestClose={()=>setExpanded(false)} onDismiss={()=>{
+    const entry=proposalAfterDismiss.current;proposalAfterDismiss.current=null;
+    if(entry && onPropose(entry)===false)setExpanded(true);
+  }}>
    <KeyboardAvoidingView behavior={Platform.OS==="ios"?"padding":undefined} style={{flex:1,backgroundColor:"rgba(0,0,0,0.6)",justifyContent:"center",paddingHorizontal:modalPadding,paddingTop:insets.top+8,paddingBottom:insets.bottom+8}}>
     <View testID="completion-expanded-card" style={{...card,padding:12,height:"100%",maxHeight:520,gap:8}}>
      <GoCloseButton level="panel" accessibilityLabel={label("Cerrar confirmación","Close confirmation")} onPress={()=>setExpanded(false)}/>
