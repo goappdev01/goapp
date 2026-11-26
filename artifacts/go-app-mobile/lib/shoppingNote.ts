@@ -38,7 +38,7 @@ export type ShoppingDocument = {
 };
 /** Same canonical presentation comparison used by catalog imports and favorite controls. */
 export function sameShoppingPresentation(a:ShoppingItem,b:ShoppingItem){return a.id===b.id||a.category===b.category&&shoppingName(a.name)===shoppingName(b.name)&&shoppingName(a.brand??"")===shoppingName(b.brand??"")&&shoppingName(a.format??"")===shoppingName(b.format??"")&&shoppingName(a.variety??"")===shoppingName(b.variety??"")&&a.unit===b.unit&&a.packageQuantity===b.packageQuantity&&a.packageUnit===b.packageUnit;}
-export type ShoppingCatalogReference={name:string;category:ShoppingCategory;id?:string;sourceListId?:string};
+export type ShoppingCatalogReference={name:string;category:ShoppingCategory;id?:string;sourceListId?:string;quantity?:number};
 export type ShoppingOperation = { operationId:string } & (
   {type:"addCatalog"; products:ShoppingCatalogReference[]} |
   {type:"saveItem"; draft:ShoppingEditorDraft} | {type:"draft"; draft?:ShoppingEditorDraft} |
@@ -198,6 +198,7 @@ export function applyShoppingOperation(current:ShoppingDocument,op:ShoppingOpera
       const seen=new Set<string>();
       for(const product of op.products){
         if(!categoryValid(product.category)||!product.name?.trim())throw Error("Producto de catálogo inválido.");
+        if(product.quantity!==undefined&&!isShoppingQuantity(product.quantity))throw Error(SHOPPING_QUANTITY_ERROR);
         const key=product.id||product.category+":"+shoppingName(product.name);
         if(seen.has(key))continue;seen.add(key);
         const matches=doc.items.filter(i=>product.id?i.id===product.id:i.category===product.category&&shoppingName(i.name)===shoppingName(product.name));
@@ -208,8 +209,9 @@ export function applyShoppingOperation(current:ShoppingDocument,op:ShoppingOpera
           if(existing.selected)continue;
           if(!isShoppingQuantity(existing.quantity))throw Error("Corrige la cantidad antigua de «"+existing.name+"» antes de añadirlo.");
           existing.selected=true;existing.bought=false;
+          if(product.quantity!==undefined)existing.quantity=product.quantity;
         }else{
-          const draft={...shoppingEditor(),name:product.name,category:product.category};
+          const draft={...shoppingEditor(),name:product.name,category:product.category,quantity:String(product.quantity??1)};
           doc.items.push(editorItem(draft,doc));
         }
       }

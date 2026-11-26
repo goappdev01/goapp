@@ -45,6 +45,19 @@ test('migrates the original list and history, then hydrates another device for t
   }finally{first.disk.close();second.close();}
 });
 
+test('catalog batch quantities reach the hosted shopping document and hydrate unchanged on another device',async()=>{
+  const first=await shoppingFixture(),second=await h.diskFixture(),remote=remoteFixture();
+  try{
+    await first.open();
+    await first.run({type:'addCatalog',products:[{name:'Pan común',category:'bakery',quantity:5},{name:'Manzanas',category:'produce',quantity:2}]});
+    await sync(first.disk,first.model,remote).syncShopping(first.disk.scope,first.disk.active);
+    const saved=remote.records.get(remote.id(first.disk.scope));
+    assert.deepEqual(saved.lists[0].note.shopping.items.map(i=>[i.name,i.quantity]),[['Pan común',5],['Manzanas',2]]);
+    await sync(second,first.model,remote).syncShopping(second.scope,second.active);
+    assert.deepEqual(h.plain(second.rows.find(row=>row.note?.shopping).note.shopping.items.map(i=>[i.name,i.quantity])),[['Pan común',5],['Manzanas',2]]);
+  }finally{first.disk.close();second.close();}
+});
+
 test('failed remote write leaves the local list unchanged and does not report success',async()=>{
   const fixture=await shoppingFixture(),remote=remoteFixture();
   try{

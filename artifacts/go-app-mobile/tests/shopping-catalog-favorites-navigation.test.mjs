@@ -4,6 +4,62 @@ const h=createRequire(import.meta.url)('./helpers/unified-note-fixture.cjs');
 const enter=async(ui,orbit,label)=>{await ui.tap('shopping-orbit-'+orbit+'-hit');if(label){const group=[...ui.hosts].find(([id,p])=>id.startsWith('shopping-subgroup-')&&p.accessibilityLabel===label);assert.ok(group,'subcategory '+label);await ui.tap(group[0]);}};
 const row='shopping-catalog-bakery-Pan común';
 
+test('multiple catalog quantities survive category and search navigation, then persist in one saved batch',async()=>{
+ const f=await shoppingFixture();let ui;try{
+  ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería y repostería');
+  await ui.tap(row);assert.equal(ui.hosts.get(row+'-quantity-value').children,1);
+  for(let i=0;i<4;i++)await ui.tap(row+'-plus');
+  assert.equal(ui.hosts.get(row+'-quantity-value').children,5);
+  const baguette='shopping-catalog-bakery-Baguette';await ui.tap(baguette);await ui.tap(baguette+'-plus');
+  assert.equal(ui.hosts.get(baguette+'-quantity-value').children,2);
+  assert.match(ui.hosts.get('shopping-catalog-save').accessibilityLabel,/Guardar 2 productos/);
+  await ui.tap('shopping-back');await ui.tap('shopping-back');await enter(ui,'produce','Frutas');
+  const apple='shopping-catalog-produce-Manzanas';await ui.tap(apple);assert.equal(ui.hosts.get(apple+'-quantity-value').children,1);
+  await ui.tap('shopping-back');await ui.tap('shopping-back');await enter(ui,'bakery','Panadería y repostería');
+  assert.equal(ui.hosts.get(row+'-quantity-value').children,5);
+  await ui.tap('shopping-back');await ui.tap('shopping-back');await ui.tap('shopping-search-open');
+  await ui.run(()=>ui.hosts.get('shopping-product-search').onChangeText('pan común'));await ui.idle();
+  assert.equal(ui.hosts.get(row+'-quantity-value').children,5);
+  await ui.tap('shopping-catalog-save');
+  assert.deepEqual(h.plain(f.doc().items.map(i=>[i.name,i.quantity])),[['Pan común',5],['Baguette',2],['Manzanas',1]]);
+  await ui.close();ui=null;await f.disk.reopen();
+  assert.deepEqual(h.plain((await f.open()).note.shopping.items.map(i=>[i.name,i.quantity])),[['Pan común',5],['Baguette',2],['Manzanas',1]]);
+ }finally{await ui?.close();f.disk.close();}
+});
+
+test('selection uses blue and green states, deselection drops only the pending product, and quantity has valid bounds',async()=>{
+ const f=await shoppingFixture();let ui;try{
+  ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería y repostería');
+  assert.equal(ui.hosts.get(row+'-select').children.props.style.color,'#1872b5');
+  await ui.tap(row);assert.equal(ui.hosts.get(row+'-select').children.props.style.color,'#137b3a');
+  assert.equal(ui.hosts.get(row+'-minus').disabled,true);assert.equal(ui.calls.filter(c=>c[0]==='haptic').length,1);
+  await ui.tap(row+'-plus');await ui.tap(row+'-minus');assert.equal(ui.hosts.get(row+'-quantity-value').children,1);
+  await ui.tap(row);assert.equal(ui.hosts.has(row+'-quantity'),false);
+  assert.equal(ui.hosts.get(row+'-select').children.props.style.color,'#1872b5');
+  assert.equal(ui.hosts.get('shopping-catalog-save').disabled,true);assert.equal(f.doc().items.length,0);
+  await assert.rejects(()=>f.run({type:'addCatalog',products:[{name:'Pan común',category:'bakery',quantity:0}]}),/cantidad entera/);
+  assert.equal(f.doc().items.length,0);
+ }finally{await ui?.close();f.disk.close();}
+});
+
+test('reselecting a saved product starts with its stored quantity and changes it only on save',async()=>{
+ const f=await shoppingFixture();let ui;try{
+  await f.open();const saved=await f.add('Pan común',{category:'bakery',quantity:'3'});await f.run({type:'select',id:saved.id,value:false});
+  ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería y repostería');await ui.tap(row);
+  assert.equal(ui.hosts.get(row+'-quantity-value').children,3);await ui.tap(row+'-plus');
+  assert.equal(f.doc().items[0].quantity,3);await ui.tap('shopping-catalog-save');
+  assert.equal(f.doc().items.length,1);assert.equal(f.doc().items[0].quantity,4);assert.equal(f.doc().items[0].selected,true);
+ }finally{await ui?.close();f.disk.close();}
+});
+
+test('a rapid quantity change followed by Guardar saves the latest value once',async()=>{
+ const f=await shoppingFixture();let ui;try{
+  ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería y repostería');await ui.tap(row);
+  await ui.run(()=>{ui.hosts.get(row+'-plus').onPress();ui.hosts.get('shopping-catalog-save').onPress();});await ui.idle();
+  assert.equal(f.doc().items.length,1);assert.equal(f.doc().items[0].quantity,2);assert.equal(f.doc().operations.length,1);
+ }finally{await ui?.close();f.disk.close();}
+});
+
 test('catalog star creates one unselected favorite and never changes a prepared checkbox, even when it gains a canonical id',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false});await enter(ui,'bakery','Panadería y repostería');await ui.tap(row);assert.equal(ui.hosts.get(row).accessibilityState.checked,true);assert.equal(f.doc().items.length,0);

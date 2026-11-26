@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View, type TextInputProps, type ViewInstance } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import * as Haptics from "expo-haptics";
 import { GoAiIdentity } from "@/components/ai/GoAiIdentity";
 import { assistantActivity } from "@/lib/goAiVisualState";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -16,11 +17,12 @@ import { useGoNoteKeyboard } from "@/hooks/useGoNoteKeyboard";
 import { useBookingVoice } from "@/hooks/useBookingVoice";
 import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import { useGoView } from "@/contexts/GoViewContext";
+import { useGoNotification } from "@/contexts/GoNotificationContext";
 import type { TaskScope } from "@/lib/goTaskReminders";
 import { subscribeGoLog, getGoLogSnapshot } from "@/lib/goLogStore";
 import { noteInScope } from "@/lib/unifiedNotes";
 import { createShoppingList, deleteShoppingList, listShoppingLists, openShoppingNote, oldShoppingNotes, renameShoppingList, restoreShoppingNote, runShoppingOperation, ShoppingNoteDeletedError } from "@/lib/shoppingNoteStore";
-import { isShoppingQuantity, legacyShoppingCandidates, SHOPPING_QUANTITY_ERROR, sameShoppingPresentation, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, shoppingPresentationPrice, stepShoppingDraftQuantity, suggestShoppingCategory, visibleShopping, groupedShopping,
+import { isShoppingQuantity, legacyShoppingCandidates, SHOPPING_QUANTITY_ERROR, sameShoppingPresentation, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, shoppingPresentationPrice, stepShoppingDraftQuantity, stepShoppingQuantity, suggestShoppingCategory, visibleShopping, groupedShopping,
   SHOPPING_CATEGORIES, type ShoppingDocument, type ShoppingEditorDraft, type ShoppingFilter, type ShoppingItem, type ShoppingOperation, type ShoppingCatalogReference } from "@/lib/shoppingNote";
 import { SHOPPING_ORBITS, SHOPPING_ENTRANCES, shoppingCommand, shoppingOrbitLayout, shoppingOrbitTypography, shoppingRoute } from "@/lib/shoppingExperience";
 import { shoppingCatalogGroups, shoppingPersonalCatalog, shoppingEntrance, shoppingCatalogItem, shoppingFavorites } from "@/lib/shoppingCatalog";
@@ -39,6 +41,7 @@ const money=(n:number,currency:string)=>n.toLocaleString("es-ES",{minimumFractio
 const shoppingPositions=new Map<string,number>();
 export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClose,closeRequested,initialListId}:Props){
   const admin=useAdminAccess(),view=useGoView();
+  const {deviceHaptics}=useGoNotification();
   const isAdminView=view.view==="ADMIN";
   const authorizedAdmin=!!scope && view.isAdminView && admin.allowed
     && !admin.checking && !admin.unavailable && admin.userId===scope.userId;
@@ -177,8 +180,12 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
     if(editor&&draftStatus==="Guardando borrador…")return;
     if(editor){setEditor(null);draftRef.current=null;setError("");return;}
     if(next){setNext(null);return;}if(legacy){setLegacy(null);return;}if(arrange){setArrange(false);return;}
-    if(catalogSelection.length){leaveCatalog(()=>{setSubgroup(null);setOrbit(null);});return;}
-    if(screen==="add"){if(subgroup){setSubgroup(null);return;}if(orbit){setOrbit(null);return;}setScreen("list");return;}
+    if(screen==="add"){
+      if(subgroup){setSubgroup(null);return;}
+      if(orbit){setOrbit(null);return;}
+      if(catalogSelection.length){leaveCatalog(()=>setScreen("list"));return;}
+      setScreen("list");return;
+    }
     onClose();
   }
   useEffect(()=>{if(closeRequested)back();},[closeRequested]);
@@ -193,9 +200,14 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
     if(!doc||busy)return;
     const existing=id?doc.items.find(i=>i.id===id):shoppingCatalogItem(doc,category,name);
     if(existing?.selected)return;
-    const product={name,category,id:existing?.id??id,sourceListId:sourceListId!==entry?.id?sourceListId:undefined};
+    const source=sourceListId?lists.find(row=>row.id===sourceListId)?.note?.shopping?.items.find(item=>item.id===id):undefined;
+    const product={name,category,id:existing?.id??id,sourceListId:sourceListId!==entry?.id?sourceListId:undefined,quantity:existing?.quantity??source?.quantity??1};
     setCatalogMessage("");
-    setCatalogSelection(previous=>previous.some(p=>sameCatalogChoice(p,product))?previous.filter(p=>!sameCatalogChoice(p,product)):[...previous,product]);
+    const previous=catalogSelectionRef.current;
+    const selected=!previous.some(p=>sameCatalogChoice(p,product));
+    const next=selected?[...previous,product]:previous.filter(p=>!sameCatalogChoice(p,product));
+    catalogSelectionRef.current=next;setCatalogSelection(next);
+    if(selected&&deviceHaptics)void Haptics.selectionAsync().catch(()=>{});
   }
   async function saveCatalog(){
     const products=catalogSelectionRef.current;if(!products.length||lock.current)return;
@@ -205,7 +217,17 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
     }catch{ /* operate reports the error; keep the selection and current category for retry. */ }
   }
   function sameCatalogChoice(a:ShoppingCatalogReference,b:ShoppingCatalogReference){return a.id&&b.id?a.id===b.id:a.category===b.category&&shoppingName(a.name)===shoppingName(b.name);}
-  const prepared=(name:string,category:ShoppingItem["category"],id?:string)=>catalogSelection.some(p=>sameCatalogChoice(p,{name,category,id}));
+  const selectedCatalog=(name:string,category:ShoppingItem["category"],id?:string)=>catalogSelection.find(p=>sameCatalogChoice(p,{name,category,id}));
+  const prepared=(name:string,category:ShoppingItem["category"],id?:string)=>!!selectedCatalog(name,category,id);
+  function stepCatalogQuantity(name:string,category:ShoppingItem["category"],id:string|undefined,direction:-1|1){
+    const next=catalogSelectionRef.current.map(product=>{
+      if(!sameCatalogChoice(product,{name,category,id}))return product;
+      const quantity=stepShoppingQuantity(String(product.quantity??1),direction);
+      return quantity===undefined?product:{...product,quantity:Number(quantity)};
+    });
+    catalogSelectionRef.current=next;setCatalogSelection(next);
+  }
+  const quantityControl=(name:string,category:ShoppingItem["category"],id?:string)=>({quantity:selectedCatalog(name,category,id)?.quantity,onStepQuantity:(direction:-1|1)=>stepCatalogQuantity(name,category,id,direction)});
   function catalogFavorite(product:ShoppingCatalogReference,fallback=false){
     const source=product.sourceListId?lists.find(row=>row.id===product.sourceListId)?.note?.shopping?.items.find(i=>i.id===product.id):undefined;
     const existing=(product.id?doc?.items.find(i=>i.id===product.id):doc&&shoppingCatalogItem(doc,product.category,product.name))??(source?doc?.items.find(i=>sameShoppingPresentation(i,source)):undefined);
@@ -327,14 +349,14 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
           <Text testID="shopping-catalog-active-list" style={s.hint}>Lista: {entry?.note?.title||"Compras"}</Text>
           <Text testID="shopping-catalog-heading" accessibilityRole="header" style={s.sectionTitle}>{orbit==="search"?"Buscar producto":orbit==="favorites"?"FAVORITOS":orbit==="review"?"Productos por revisar":subgroup||SHOPPING_ENTRANCES.find(o=>o.id===orbit)?.label}</Text>
           {orbit==="search"&&<TextInput testID="shopping-product-search" accessibilityLabel="Buscar producto" value={searchQuery} onChangeText={setSearchQuery} style={s.input} placeholder="Escribe el producto" autoFocus/>}
-          {orbit==="search"&&!!searchQuery.trim()&&items.filter(item=>shoppingName(item.name).includes(shoppingName(searchQuery))).map(item=><ShoppingCatalogChoice key={item.id} testID={"shopping-saved-"+item.id} name={item.name} art={shoppingProductArt(item.name).art} checked={item.selected||prepared(item.name,item.category,item.id)} disabled={busy||item.selected} status={item.selected?"En lista":prepared(item.name,item.category,item.id)?"Preparado":"Seleccionar"} {...catalogFavorite({name:item.name,category:item.category,id:item.id})} onChoose={()=>chooseCatalog(item.name,item.category,item.id)}/>)}
-          {orbit==="favorites"?shoppingFavorites(doc).map(item=><ShoppingCatalogChoice key={item.id} testID={"shopping-favorite-item-"+item.id} name={item.name} art={shoppingProductArt(item.name).art} checked={item.selected||prepared(item.name,item.category,item.id)} disabled={busy} status={item.selected?"En lista":prepared(item.name,item.category,item.id)?"Preparado":"Seleccionar"} {...catalogFavorite({name:item.name,category:item.category,id:item.id})} onChoose={()=>item.selected?startEditor(item):chooseCatalog(item.name,item.category,item.id)}/>):
+          {orbit==="search"&&!!searchQuery.trim()&&items.filter(item=>shoppingName(item.name).includes(shoppingName(searchQuery))).map(item=><ShoppingCatalogChoice key={item.id} testID={"shopping-saved-"+item.id} name={item.name} art={shoppingProductArt(item.name).art} checked={item.selected||prepared(item.name,item.category,item.id)} disabled={busy||item.selected} status={item.selected?"En lista":prepared(item.name,item.category,item.id)?"Preparado":"Seleccionar"} {...quantityControl(item.name,item.category,item.id)} {...catalogFavorite({name:item.name,category:item.category,id:item.id})} onChoose={()=>chooseCatalog(item.name,item.category,item.id)}/>)}
+          {orbit==="favorites"?shoppingFavorites(doc).map(item=><ShoppingCatalogChoice key={item.id} testID={"shopping-favorite-item-"+item.id} name={item.name} art={shoppingProductArt(item.name).art} checked={item.selected||prepared(item.name,item.category,item.id)} disabled={busy} status={item.selected?"En lista":prepared(item.name,item.category,item.id)?"Preparado":"Seleccionar"} {...quantityControl(item.name,item.category,item.id)} {...catalogFavorite({name:item.name,category:item.category,id:item.id})} onChoose={()=>item.selected?startEditor(item):chooseCatalog(item.name,item.category,item.id)}/>):
             !subgroup&&orbit!=="search"?shoppingCatalogGroups(orbit).map((group,index)=><TouchableOpacity key={group.label+index} testID={"shopping-subgroup-"+index} accessibilityRole="button" accessibilityLabel={group.label} onPress={()=>setSubgroup(group.label)} style={s.catalogRow}><Feather name="folder" size={21} color="#2177bd"/><Text style={s.catalogName}>{group.label}</Text><Feather name="chevron-right" size={20} color="#527ca3"/></TouchableOpacity>):
             orbit==="search"&&!searchQuery.trim()?<Text style={s.hint}>Escribe el nombre para buscar en todas las categorías.</Text>:
-            shoppingCatalogGroups(orbit,orbit==="search"?searchQuery:"").filter(group=>!subgroup||group.label===subgroup).map((group,index)=><View key={group.orbit+group.label+index} style={{gap:4}}>{shoppingName(group.label)!==shoppingName(subgroup||SHOPPING_ENTRANCES.find(o=>o.id===orbit)?.label||"")&&<Text testID={"shopping-catalog-group-heading-"+index} style={s.catalogGroup}>{group.label}</Text>}{group.products.map(name=>{const existing=shoppingCatalogItem(doc,group.category,name);return <ShoppingCatalogChoice key={name} testID={"shopping-catalog-"+group.orbit+"-"+name} name={name} art={shoppingProductArt(name).art} checked={!!existing?.selected||prepared(name,group.category,existing?.id)} disabled={busy||!!existing?.selected} status={existing?.selected?"En lista":prepared(name,group.category,existing?.id)?"Preparado":"Seleccionar"} {...catalogFavorite({name,category:group.category,id:existing?.id})} onChoose={()=>chooseCatalog(name,group.category,existing?.id)}/>;})}</View>)}
+            shoppingCatalogGroups(orbit,orbit==="search"?searchQuery:"").filter(group=>!subgroup||group.label===subgroup).map((group,index)=><View key={group.orbit+group.label+index} style={{gap:4}}>{shoppingName(group.label)!==shoppingName(subgroup||SHOPPING_ENTRANCES.find(o=>o.id===orbit)?.label||"")&&<Text testID={"shopping-catalog-group-heading-"+index} style={s.catalogGroup}>{group.label}</Text>}{group.products.map(name=>{const existing=shoppingCatalogItem(doc,group.category,name);return <ShoppingCatalogChoice key={name} testID={"shopping-catalog-"+group.orbit+"-"+name} name={name} art={shoppingProductArt(name).art} checked={!!existing?.selected||prepared(name,group.category,existing?.id)} disabled={busy||!!existing?.selected} status={existing?.selected?"En lista":prepared(name,group.category,existing?.id)?"Preparado":"Seleccionar"} {...quantityControl(name,group.category,existing?.id)} {...catalogFavorite({name,category:group.category,id:existing?.id})} onChoose={()=>chooseCatalog(name,group.category,existing?.id)}/>;})}</View>)}
           {orbit==="favorites"&&!shoppingFavorites(doc).length&&<Text style={s.hint}>Aún no tienes favoritos. Márcalos desde cada producto.</Text>}
           {personalCatalog.map(({item,sourceListId})=><View key={item.id} testID={"shopping-custom-"+item.id} style={{gap:4}}>
-            <ShoppingCatalogChoice testID={"shopping-custom-choice-"+item.id} name={[item.name,item.brand,item.format,item.variety].filter(Boolean).join(" · ")} art={shoppingProductArt(item.name).art} checked={!!doc.items.find(i=>i.id===item.id)?.selected||prepared(item.name,item.category,item.id)} disabled={busy||!!doc.items.find(i=>i.id===item.id)?.selected} status={doc.items.find(i=>i.id===item.id)?.selected?"En lista":prepared(item.name,item.category,item.id)?"Preparado":"Seleccionar"} {...catalogFavorite({name:item.name,category:item.category,id:item.id,sourceListId},item.favorite)} onChoose={()=>chooseCatalog(item.name,item.category,item.id,sourceListId)}/>
+            <ShoppingCatalogChoice testID={"shopping-custom-choice-"+item.id} name={[item.name,item.brand,item.format,item.variety].filter(Boolean).join(" · ")} art={shoppingProductArt(item.name).art} checked={!!doc.items.find(i=>i.id===item.id)?.selected||prepared(item.name,item.category,item.id)} disabled={busy||!!doc.items.find(i=>i.id===item.id)?.selected} status={doc.items.find(i=>i.id===item.id)?.selected?"En lista":prepared(item.name,item.category,item.id)?"Preparado":"Seleccionar"} {...quantityControl(item.name,item.category,item.id)} {...catalogFavorite({name:item.name,category:item.category,id:item.id,sourceListId},item.favorite)} onChoose={()=>chooseCatalog(item.name,item.category,item.id,sourceListId)}/>
             <View style={s.row}>{button("Editar",()=>startEditor(item,"",undefined,undefined,undefined,sourceListId,true),"shopping-custom-edit-"+item.id)}{button("Quitar del catálogo",()=>Alert.alert("Quitar del catálogo", "Se ocultará la definición del catálogo personal. Sus compras e historial se conservan.",[{text:"Cancelar",style:"cancel"},{text:"QUITAR",style:"destructive",onPress:()=>{void operate({type:"catalogVisibility",id:item.id,hidden:true},true,sourceListId).catch(()=>{});}}]),"shopping-custom-remove-"+item.id)}</View>
           </View>)}
           {orbit==="search"&&button("Productos por revisar",()=>{setOrbit("review");setSubgroup(null);},"shopping-catalog-review")}
