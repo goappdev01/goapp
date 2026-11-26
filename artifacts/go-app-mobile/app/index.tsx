@@ -23,6 +23,8 @@ import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
 import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
 import { useActionCompletion } from "@/hooks/useActionCompletion";
 import { LandingActionCompletion, type CompletionFrame } from "@/components/landing/LandingActionCompletion";
+import { LocalTransportPanel } from "@/components/LocalTransportPanel";
+import type { LocalTransportKind } from "@/data/localTransport";
 import { completionKey, ownedCompletionEntry, completionEligible, completionHideEligible, completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
 import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, type NoteReminderDraft } from "@/lib/goNoteTools";
 import { saveGoNoteReminder, changeGoNoteReminder, confirmAttachedGoNoteReminder } from "@/lib/goNoteReminder";
@@ -2558,6 +2560,8 @@ function HomeScreenContent() {
   const [duration, setDuration] = useState("");
 
   const [contactOpen, setContactOpen] = useState(false);
+  const [localTransportKind, setLocalTransportKind] = useState<LocalTransportKind | null>(null);
+  const transportAfterSummaryRef = useRef<LocalTransportKind | null>(null);
   const [contactRequiredError, setContactRequiredError] = useState(false);
   const [silencedContacts, setSilencedContacts] = useState<Array<{ name: string; phone: string }>>([]);
   const [blockedContacts, setBlockedContacts] = useState<Array<{ name: string; phone: string }>>([]);
@@ -11884,16 +11888,14 @@ function HomeScreenContent() {
     calFlow.navigateMonth(delta);
   };
 
-  const openTaxi = async () => {
-    Haptics.selectionAsync();
-    let url = "https://m.uber.com/";
-    if (coords) {
-      url = `https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[latitude]=${coords.lat}&dropoff[longitude]=${coords.lng}`;
-    }
-    try {
-      await Linking.openURL(url);
-    } catch {
-      showToast(t('toast_taxi_error'), "error");
+  const openTransportPanel = (kind: LocalTransportKind) => {
+    Haptics.selectionAsync().catch(() => {});
+    if (aiSummaryOpen && Platform.OS === "ios") {
+      transportAfterSummaryRef.current = kind;
+      setAiSummaryOpen(false);
+    } else {
+      if (aiSummaryOpen) setAiSummaryOpen(false);
+      setLocalTransportKind(kind);
     }
   };
 
@@ -13979,21 +13981,23 @@ function HomeScreenContent() {
     >
       {(
         [
-          { label: "Taxi",  icon: "truck"      as keyof typeof Feather.glyphMap, accent: "#fbbf24", toast: t('toast_taxi_looking')    },
+          { label: "Taxi",  icon: "truck"      as keyof typeof Feather.glyphMap, accent: "#fbbf24", action: () => openTransportPanel("taxi") },
           { label: "Uber",  icon: "navigation" as keyof typeof Feather.glyphMap, accent: "#e2e8f0", url:   "https://m.uber.com",  raise: 1 },
           { label: "Bolt",  icon: "zap"        as keyof typeof Feather.glyphMap, accent: "#4ade80", url:   "https://bolt.eu"    },
-          { label: "T.pub", icon: "map"        as keyof typeof Feather.glyphMap, accent: "#60a5fa", toast: t('toast_routes_showing') },
-        ] as { label: string; icon: keyof typeof Feather.glyphMap; accent: string; url?: string; toast?: string; raise?: number }[]
+          { label: "T.pub", icon: "map"        as keyof typeof Feather.glyphMap, accent: "#60a5fa", action: () => openTransportPanel("public") },
+        ] as { label: string; icon: keyof typeof Feather.glyphMap; accent: string; url?: string; action?: () => void; raise?: number }[]
       ).map((op) => (
         <TouchableOpacity
           key={op.label}
+          accessibilityRole="button"
+          accessibilityLabel={op.label === "T.pub" ? (lang === "en" ? "Public transport" : "Transporte público") : op.label}
           activeOpacity={0.65}
           onPress={(event) => {
             event?.stopPropagation();
             if (op.url) {
               Linking.openURL(op.url).catch(() => showToast(t('toast_link_error'), "error"));
-            } else if (op.toast) {
-              showToast(op.toast);
+            } else if (op.action) {
+              op.action();
             }
           }}
           style={{
@@ -20210,6 +20214,9 @@ function HomeScreenContent() {
         </TouchableOpacity>
       </BottomSheet>
 
+      <LocalTransportPanel kind={localTransportKind} onClose={() => setLocalTransportKind(null)}
+        scopeKey={JSON.stringify(completionIdentity.ready ? completionIdentity.scope : null)} lang={lang} handedness={handedness} />
+
       {/* CALENDAR MODAL — Agenda Operativa arriba + selector abajo */}
       <Modal
         calendarWatermark
@@ -22900,6 +22907,7 @@ function HomeScreenContent() {
       {/* AI SUMMARY — confirm / edit / cancel before applying */}
       <BottomSheet
         visible={aiSummaryOpen}
+        onDismiss={() => { const kind = transportAfterSummaryRef.current; transportAfterSummaryRef.current = null; if (kind) setLocalTransportKind(kind); }}
         onPanelHeightChange={setOverlayPanelHeight}
         onClose={cancelAiSummary}
         title={t('ai_summary_title')}
@@ -23304,7 +23312,7 @@ function HomeScreenContent() {
                             if (tr.url) {
                               Linking.openURL(tr.url).catch(() => showToast(t('toast_link_error'), "error"));
                             } else {
-                              showToast(t('toast_opening').replace('__NAME__', tr.nombre));
+                              openTransportPanel("taxi");
                             }
                           }}
                           style={{
