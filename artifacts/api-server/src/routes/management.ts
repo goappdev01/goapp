@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { bearerHeader, supabaseRequest, supabaseStorageRequest } from "../lib/supabase";
 import { CatalogImportError, extractCatalogHtml, fetchPublicCatalog } from "../lib/catalogImport";
+import { catalogDocumentCapabilities, extractCatalogDocument } from "../lib/catalogDocument";
 
 const router = Router();
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -101,31 +102,42 @@ async function ownsBusiness(req: Request, res: Response): Promise<boolean> {
   return true;
 }
 const catalogReads = new Map<string, number>();
+async function recordCatalogUse(req: Request, method: string, outcome: "success" | "insufficient" | "error"): Promise<void> {
+  try { await request(req, "rpc/go_catalog_import_record", "POST", {
+    p_business_id: req.params.businessId, p_method: method, p_outcome: outcome,
+  }); } catch { /* Analytics cannot change an import result. */ }
+}
+router.get("/businesses/:businessId/catalog-import/capabilities", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  if (!await ownsBusiness(req, res)) return;
+  const available = await catalogDocumentCapabilities();
+  res.json({ url: true, ...available, goAi: false });
+});
 router.post("/businesses/:businessId/catalog-import/extract", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   const body = req.body ?? {};
-  if (body.source !== "url" || typeof body.url !== "string" || Object.keys(body).some(key => !["source", "url"].includes(key))) {
-    res.status(body.source === "image" || body.source === "pdf" ? 501 : 400).json({
-      code: body.source === "image" || body.source === "pdf" ? "CATALOG_OCR_UNAVAILABLE" : "CATALOG_SOURCE_INVALID",
-      error: body.source === "image" || body.source === "pdf"
-        ? "La lectura de imágenes y PDF necesita un motor OCR autorizado; no se ha importado ningún dato."
-        : "Selecciona un enlace de catálogo público válido.",
-    }); return;
-  }
+  const isUrl = body.source === "url" && typeof body.url === "string"
+    && Object.keys(body).every(key => ["source", "url"].includes(key));
+  const isFile = ["image", "pdf"].includes(body.source) && typeof body.mime === "string"
+    && typeof body.content_base64 === "string"
+    && Object.keys(body).every(key => ["source", "mime", "content_base64"].includes(key));
+  if (!isUrl && !isFile) { res.status(400).json({ code: "CATALOG_SOURCE_INVALID", error: "Selecciona un enlace, fotografía o PDF válido." }); return; }
   if (!await ownsBusiness(req, res)) return;
   const user = String(res.locals.userId), now = Date.now();
   if (now - (catalogReads.get(user) ?? 0) < 3000) { res.status(429).json({ code: "CATALOG_RATE_LIMIT", error: "Espera unos segundos antes de analizar otro enlace." }); return; }
   catalogReads.set(user, now);
   try {
-    const html = await fetchPublicCatalog(body.url);
-    const services = extractCatalogHtml(html);
-    if (!services.length) { res.status(422).json({ code: "CATALOG_NO_PRICED_ROWS", error: "No se encontraron servicios con nombre y precio explícitos. No se importó nada." }); return; }
-    if (services.length > 40) { res.status(422).json({ code: "CATALOG_TOO_MANY_ROWS", error: "La página contiene más de 40 entradas. Usa el enlace de una categoría de la carta para revisar la importación completa." }); return; }
-    res.json({ ok: true, services });
+    const result = isUrl ? { services: extractCatalogHtml(await fetchPublicCatalog(body.url)), method: "direct" as const }
+      : await extractCatalogDocument(body.source, body.mime, body.content_base64);
+    if (!result.services.length) { await recordCatalogUse(req, result.method, "insufficient"); res.status(422).json({ code: "CATALOG_NO_PRICED_ROWS", error: "No se encontraron entradas con nombre y precio explícitos. Revisa el documento; no se importó nada." }); return; }
+    if (result.services.length > 40) { await recordCatalogUse(req, result.method, "error"); res.status(422).json({ code: "CATALOG_TOO_MANY_ROWS", error: "El documento supera 40 entradas. Divide el catálogo en secciones para revisarlo completo." }); return; }
+    await recordCatalogUse(req, result.method, "success");
+    res.json({ ok: true, services: result.services, method: result.method });
   } catch (error) {
     const known = error instanceof CatalogImportError ? error : null;
-    res.status(known?.code === "CATALOG_URL_INVALID" || known?.code === "CATALOG_URL_PRIVATE" ? 400 : 422)
-      .json({ code: known?.code ?? "CATALOG_SOURCE_UNAVAILABLE", error: known?.message ?? "No se pudo leer esta página pública. No se importó nada." });
+    await recordCatalogUse(req, isUrl ? "direct" : body.source === "image" ? "ocr" : "pdf", "error");
+    res.status(known?.code === "CATALOG_URL_INVALID" || known?.code === "CATALOG_URL_PRIVATE" || known?.code === "CATALOG_FILE_INVALID" ? 400 : known?.code === "CATALOG_BUSY" ? 429 : 422)
+      .json({ code: known?.code ?? "CATALOG_SOURCE_UNAVAILABLE", error: known?.message ?? "No se pudo leer esta fuente. No se importó nada." });
   }
 });
 router.post("/businesses/:businessId/catalog-import/confirm", async (req, res) => {
@@ -133,10 +145,13 @@ router.post("/businesses/:businessId/catalog-import/confirm", async (req, res) =
   const rows = req.body?.services;
   if (!Array.isArray(rows) || !rows.length || rows.length > 40 || Object.keys(req.body ?? {}).some(key => key !== "services")
     || rows.some(row => !row || typeof row !== "object" || Array.isArray(row)
-      || Object.keys(row).some(key => !["name", "description", "price", "duration", "capacity"].includes(key))
+      || Object.keys(row).some(key => !["name", "description", "price", "duration", "capacity", "kind", "category", "variant"].includes(key))
       || typeof row.name !== "string" || row.name.trim().length < 2 || row.name.length > 120
       || typeof row.description !== "string" || row.description.length > 1000
-      || !Number.isInteger(row.duration) || row.duration < 1 || row.duration > 1440
+      || ![undefined, "service", "product"].includes(row.kind)
+      || row.category !== undefined && (typeof row.category !== "string" || row.category.length > 80)
+      || row.variant !== undefined && (typeof row.variant !== "string" || row.variant.length > 80)
+      || !Number.isInteger(row.duration) || (row.kind === "product" ? row.duration !== 0 : row.duration < 1 || row.duration > 1440)
       || typeof row.price !== "number" || !Number.isFinite(row.price) || row.price < 0 || row.price > 100000
       || Math.abs(row.price * 100 - Math.round(row.price * 100)) > 0.0001
       || row.capacity !== 1)) { res.status(400).json({ code: "CATALOG_IMPORT_INVALID", error: "Revisa nombres, precios y duraciones antes de confirmar." }); return; }

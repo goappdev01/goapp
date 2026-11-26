@@ -17,6 +17,16 @@ router.get("/access", requireAdminPermission("admin.access"), (_req, res) => {
   res.json({ userId: res.locals.adminUserId, role: "admin", allowed: true,
     level: res.locals.adminLevel, permissions: res.locals.adminPermissions });
 });
+router.get("/catalog-import/usage", requireAdminPermission("admin.access"), async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const response = await supabaseRequest("/rest/v1/rpc/go_catalog_import_usage", {
+    method: "POST", headers: { ...bearerHeader(req.header("authorization")), "Content-Type": "application/json" }, body: "{}",
+  });
+  if (!response.ok) { res.status(502).json({ error: "No se pudo consultar el uso de importaciones." }); return; }
+  const rows = await response.json();
+  if (!Array.isArray(rows)) { res.status(502).json({ error: "Métricas de importación no disponibles." }); return; }
+  res.json({ days: rows, aiAvailable: false, aiCalls: 0, inputTokens: 0, outputTokens: 0, estimatedCostEur: null });
+});
 
 router.get("/trial/applications", requireAdminPermission("ownership.manage"), async (req, res) => {
   if (process.env.GO_BUSINESS_TRIAL_ONBOARDING !== "enabled") { res.json([]); return; }

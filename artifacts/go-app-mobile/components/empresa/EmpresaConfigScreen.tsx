@@ -50,7 +50,11 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import QRCode from "react-native-qrcode-svg";
 import { GoOcrImportSheet } from "@/components/empresa/GoOcrImportSheet";
+import * as DocumentPicker from "expo-document-picker";
+import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { confirmCatalogImport } from "@/data/catalogImport";
+import { catalogImportCapabilities, type CatalogImportService } from "@/data/catalogImport";
 import { ProfessionalGapPolicy } from "./ProfessionalGapPolicy";
 import { Step0Actividad } from "@/components/empresa/EmpresaSetupGuide";
 import { captureAuthIdentity, isAuthIdentityCurrent } from "@/lib/authSession";
@@ -2559,6 +2563,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
   // ── OCR import state ────────────────────────────────────────────────────────
   const [ocrVisible,   setOcrVisible]   = useState(false);
   const [ocrIsUrl,     setOcrIsUrl]     = useState(false);
+  const [ocrFile, setOcrFile] = useState<{ source: "image" | "pdf"; mime: string; content_base64: string } | null>(null);
 
   const patchSvc = (id: string, patch: Partial<SavedService>) =>
     setLocalSvcs(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
@@ -2573,40 +2578,68 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     setLocalSvcs(prev => [...prev, { id: `svc_${Date.now()}`, name: "", duration: 30, price: 0, capacity: 1 }]);
   };
 
-  const handleImageImport = () => {
+  const openImage = async (camera: boolean) => {
     if (demo) { blockDemoExternal(lang); return; }
-    Alert.alert(lang === "en" ? "Import unavailable" : "Importación no disponible",
-      lang === "en" ? "Reading photos needs an authorised OCR engine. GO will not access your camera or gallery or import anything."
-        : "La lectura de fotografías necesita un motor OCR autorizado. No se solicitará acceso a cámara o galería ni se importará nada.");
+    try {
+      const capability = await catalogImportCapabilities(config.businessId ?? "");
+      if (!capability.image) throw new Error("La lectura de fotografías no está disponible en este momento.");
+      if (camera && !(await ImagePicker.requestCameraPermissionsAsync()).granted) return;
+      const picked = await (camera ? ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.75, base64: true })
+        : ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.75, base64: true }));
+      if (picked.canceled || !picked.assets?.[0]) return;
+      const asset = picked.assets[0];
+      const mime = asset.base64?.startsWith("iVBOR") ? "image/png" : asset.base64?.startsWith("/9j/") ? "image/jpeg" : "";
+      if (!mime || !asset.base64 || asset.base64.length > 7_000_000) throw new Error("Elige una imagen JPG o PNG de hasta 5 MB.");
+      setOcrFile({ source: "image", mime, content_base64: asset.base64 });
+      setOcrIsUrl(false); setOcrVisible(true);
+    } catch (error) { Alert.alert("Fotografía", error instanceof Error ? error.message : "No se pudo abrir la fotografía."); }
+  };
+  const handleImageImport = () => {
+    Alert.alert("Importar fotografía", "Selecciona la fuente del catálogo.", [
+      { text: "Galería", onPress: () => { void openImage(false); } },
+      { text: "Cámara", onPress: () => { void openImage(true); } },
+      { text: "Cancelar", style: "cancel" },
+    ]);
   };
 
   // ── OCR: launch PDF picker ──────────────────────────────────────────────────
   const handlePdfImport = async () => {
     if (demo) { blockDemoExternal(lang); return; }
-    Alert.alert(lang === "en" ? "Import unavailable" : "Importación no disponible",
-      lang === "en" ? "Reading PDF needs an authorised extractor. GO will not access your document or import anything."
-        : "La lectura de PDF necesita un extractor autorizado. No se accederá al documento ni se importará nada.");
+    try {
+      const capability = await catalogImportCapabilities(config.businessId ?? "");
+      if (!capability.pdf) throw new Error("La lectura de PDF no está disponible en este momento.");
+      const picked = await DocumentPicker.getDocumentAsync({ type: "application/pdf", copyToCacheDirectory: true, multiple: false });
+      if (picked.canceled || !picked.assets?.[0]) return;
+      const asset = picked.assets[0];
+      if (asset.size && asset.size > 5 * 1024 * 1024) throw new Error("El PDF supera 5 MB.");
+      const content_base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+      if (content_base64.length > 7_000_000) throw new Error("El PDF supera 5 MB.");
+      setOcrFile({ source: "pdf", mime: "application/pdf", content_base64 });
+      setOcrIsUrl(false); setOcrVisible(true);
+    } catch (error) { Alert.alert("PDF", error instanceof Error ? error.message : "No se pudo abrir el PDF."); }
   };
 
   // ── OCR: launch URL import ──────────────────────────────────────────────────
   const handleUrlImport = () => {
     if (demo) { blockDemoExternal(lang); return; }
     Haptics.selectionAsync().catch(() => {});
+    setOcrFile(null);
     setOcrIsUrl(true);
     setOcrVisible(true);
   };
 
   // ── OCR: import confirmed services ──────────────────────────────────────────
-  const handleOcrImport = async (newServices: SavedService[]) => {
+  const handleOcrImport = async (newServices: CatalogImportService[]) => {
     if (!config.businessId || !waitForConfigSave || !reloadConfig) throw new Error("Selecciona una empresa real antes de importar.");
     await flushServices();
     await waitForConfigSave(config.businessId);
     const result = await confirmCatalogImport(config.businessId, newServices.map(service => ({
       name: service.name, description: service.description ?? "", price: service.price,
-      duration: service.duration, capacity: 1,
+      duration: service.duration, capacity: 1, kind: service.kind, category: service.category, variant: service.variant,
     })));
     reloadConfig();
     setOcrIsUrl(false);
+    setOcrFile(null);
     setOcrVisible(false);
     if (result.imported === 0) Alert.alert("Sin cambios", "Los servicios seleccionados ya están en el catálogo de esta empresa.");
   };
@@ -2757,11 +2790,11 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
       {/* OCR Review Sheet */}
       {!demo && <GoOcrImportSheet
         visible={ocrVisible}
-        sourceUri={null}
-        isPdf={false}
+        sourceFile={ocrFile}
         isUrl={ocrIsUrl}
+        defaultKind={["restaurante", "cafeteria", "bar", "comida_rapida", "confiteria"].includes(config.subId ?? "") ? "product" : "service"}
         businessId={config.businessId ?? ""}
-        onClose={() => { setOcrVisible(false); setOcrIsUrl(false); }}
+        onClose={() => { setOcrVisible(false); setOcrIsUrl(false); setOcrFile(null); }}
         onImport={handleOcrImport}
       />}
     </View>

@@ -9,8 +9,7 @@
  *   review     → Lista editable con checkboxes para confirmar la importación
  *   error      → Mensaje de error + botón reintentar
  *
- * Public HTML prices are extracted server-side. Camera/PDF require an
- * authorized OCR engine and remain unavailable until one is configured.
+ * Public HTML, images and PDF are read by the same protected server route.
  */
 
 import React, { useEffect, useRef, useState } from "react";
@@ -32,9 +31,8 @@ import {
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { SavedService } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { extractPublicCatalog } from "@/data/catalogImport";
+import { extractCatalogFile, extractPublicCatalog, type CatalogImportService } from "@/data/catalogImport";
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 
@@ -56,32 +54,37 @@ const RED    = "#EF4444";
 
 type Phase = "url_input" | "processing" | "review" | "error";
 
-type ExtractedSvc = Omit<SavedService, "price" | "duration"> & {
+type ExtractedSvc = {
   id:          string;
   selected:    boolean;
+  name: string;
   description: string;
   priceInput: string;
   durationInput: string;
+  category: string;
+  variant: string;
+  kind: "service" | "product";
+  needsReview: boolean;
 };
 
 export type GoOcrImportSheetProps = {
   visible:   boolean;
-  sourceUri: string | null;
-  isPdf:     boolean;
+  sourceFile?: { source: "image" | "pdf"; mime: string; content_base64: string } | null;
   isUrl?:    boolean;
+  defaultKind?: "service" | "product";
   businessId: string;
   onClose:   () => void;
-  onImport:  (services: SavedService[]) => Promise<void>;
+  onImport:  (services: CatalogImportService[]) => Promise<void>;
 };
 
 // ── Hint texts ────────────────────────────────────────────────────────────────
 
-const IMG_HINTS    = ["Analizando imagen…",   "Detectando servicios…", "Extrayendo precios…",    "Casi listo…"];
-const PDF_HINTS    = ["Leyendo documento…",   "Detectando servicios…", "Extrayendo tarifas…",    "Casi listo…"];
-const URL_HINTS    = ["Leyendo la página…",   "Detectando servicios…", "Extrayendo precios…",    "Casi listo…"];
-const IMG_HINTS_EN = ["Analysing image…",     "Detecting services…",   "Extracting prices…",     "Almost done…"];
-const PDF_HINTS_EN = ["Reading document…",    "Detecting services…",   "Extracting rates…",      "Almost done…"];
-const URL_HINTS_EN = ["Reading the page…",    "Detecting services…",   "Extracting prices…",     "Almost done…"];
+const IMG_HINTS    = ["Analizando imagen…",   "Detectando entradas…", "Extrayendo precios…",    "Casi listo…"];
+const PDF_HINTS    = ["Leyendo documento…",   "Detectando entradas…", "Extrayendo tarifas…",    "Casi listo…"];
+const URL_HINTS    = ["Leyendo la página…",   "Detectando entradas…", "Extrayendo precios…",    "Casi listo…"];
+const IMG_HINTS_EN = ["Analysing image…",     "Detecting items…",   "Extracting prices…",     "Almost done…"];
+const PDF_HINTS_EN = ["Reading document…",    "Detecting items…",   "Extracting rates…",      "Almost done…"];
+const URL_HINTS_EN = ["Reading the page…",    "Detecting items…",   "Extracting prices…",     "Almost done…"];
 
 // ── URL example hints ─────────────────────────────────────────────────────────
 
@@ -95,9 +98,9 @@ const URL_EXAMPLES = [
 
 export function GoOcrImportSheet({
   visible,
-  sourceUri,
-  isPdf,
+  sourceFile,
   isUrl = false,
+  defaultKind = "service",
   businessId,
   onClose,
   onImport,
@@ -105,6 +108,7 @@ export function GoOcrImportSheet({
   const insets              = useSafeAreaInsets();
   const { height: SCREEN_H } = Dimensions.get("window");
   const { lang } = useLanguage();
+  const isPdf = sourceFile?.source === "pdf";
 
   const [phase,    setPhase]    = useState<Phase>("processing");
   const [svcs,     setSvcs]     = useState<ExtractedSvc[]>([]);
@@ -112,12 +116,13 @@ export function GoOcrImportSheet({
   const [hintIdx,  setHintIdx]  = useState(0);
   const [url,      setUrl]      = useState("");
   const [saving, setSaving] = useState(false);
+  const extractionGeneration = useRef(0);
 
   // Keep latest values for async callbacks
-  const isPdfRef  = useRef(isPdf);
+  const isPdfRef  = useRef(sourceFile?.source === "pdf");
   const isUrlRef  = useRef(isUrl);
   const urlRef    = useRef(url);
-  isPdfRef.current  = isPdf;
+  isPdfRef.current  = sourceFile?.source === "pdf";
   isUrlRef.current  = isUrl;
   urlRef.current    = url;
 
@@ -129,17 +134,14 @@ export function GoOcrImportSheet({
   // ── Visibility ────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    extractionGeneration.current++;
     if (visible) {
       if (isUrl) {
         setPhase("url_input");
         setUrl("");
       } else {
-        setPhase("error");
-        setSvcs([]);
-        setErrorMsg(lang === "en"
-          ? "Image and PDF reading needs an authorised OCR engine. Nothing was imported."
-          : "La lectura de imágenes y PDF necesita un motor OCR autorizado. No se ha importado nada.");
-        setHintIdx(0);
+        if (sourceFile) void doExtract(undefined, sourceFile);
+        else { setPhase("error"); setErrorMsg("Selecciona una fotografía o PDF."); }
       }
       Animated.timing(slideAnim, {
         toValue: 0, duration: 340,
@@ -151,7 +153,7 @@ export function GoOcrImportSheet({
         useNativeDriver: true, easing: Easing.in(Easing.cubic),
       }).start();
     }
-  }, [visible]);
+  }, [visible, businessId]);
 
   // ── Scan animation ────────────────────────────────────────────────────────
 
@@ -185,29 +187,36 @@ export function GoOcrImportSheet({
 
   // ── API call ──────────────────────────────────────────────────────────────
 
-  const doExtract = async (extractUrl?: string) => {
+  const doExtract = async (extractUrl?: string, file?: NonNullable<typeof sourceFile>) => {
+    const generation = ++extractionGeneration.current;
     setPhase("processing");
     setSvcs([]);
     setErrorMsg("");
     setHintIdx(0);
 
     try {
-      if (!extractUrl) throw new Error("Esta fuente necesita un motor OCR autorizado.");
-      const candidates = await extractPublicCatalog(businessId, extractUrl);
+      if (!extractUrl && !file) throw new Error("Selecciona una fuente de catálogo.");
+      const candidates = extractUrl ? await extractPublicCatalog(businessId, extractUrl)
+        : await extractCatalogFile(businessId, file!.source, file!.mime, file!.content_base64);
+      if (generation !== extractionGeneration.current) return;
       const extracted: ExtractedSvc[] = candidates.map((sv, i) => ({
         id:          `ex_${Date.now()}_${i}`,
         name:        sv.name,
         priceInput:  sv.price === null ? "" : String(sv.price),
         durationInput: sv.duration === null ? "" : String(sv.duration),
-        capacity:    1,
         description: sv.description,
+        category: sv.category ?? "",
+        variant: sv.variant ?? "",
+        kind: defaultKind,
+        needsReview: sv.needsReview === true || !!file,
         selected:    true,
       }));
 
       setSvcs(extracted);
       setPhase("review");
     } catch (err: any) {
-      setErrorMsg(err?.message || "No se pudo leer la página. No se importó nada.");
+      if (generation !== extractionGeneration.current) return;
+      setErrorMsg(err?.message || "No se pudo leer el catálogo. No se importó nada.");
       setPhase("error");
     }
   };
@@ -264,17 +273,18 @@ export function GoOcrImportSheet({
     if (!selected.length || selected.some(s => s.name.trim().length < 2
       || !/^\d{1,6}(?:[,.]\d{1,2})?$/.test(s.priceInput.trim())
       || Number(s.priceInput.replace(",", ".")) > 100000
-      || !/^\d{1,4}$/.test(s.durationInput.trim())
-      || Number(s.durationInput) < 1 || Number(s.durationInput) > 1440)) {
+      || (s.kind === "service" && (!/^\d{1,4}$/.test(s.durationInput.trim())
+      || Number(s.durationInput) < 1 || Number(s.durationInput) > 1440)))) {
       Alert.alert(lang === "en" ? "Review services" : "Revisa los servicios",
-        lang === "en" ? "Each selected service needs a name, price and duration before importing."
-          : "Cada servicio seleccionado necesita nombre, precio y duración antes de importar.");
+        lang === "en" ? "Review the name and price. Services also need a duration."
+          : "Revisa nombre y precio. Los servicios también necesitan duración.");
       return;
     }
     setSaving(true);
     try {
       await onImport(selected.map(s => ({ name: s.name.trim(), description: s.description,
-        duration: Number(s.durationInput), price: Number(s.priceInput.replace(",", ".")), capacity: 1 })));
+        duration: s.kind === "product" ? 0 : Number(s.durationInput), price: Number(s.priceInput.replace(",", ".")), capacity: 1,
+        kind: s.kind, category: s.category.trim(), variant: s.variant.trim() })));
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (error) {
       Alert.alert(lang === "en" ? "Import not saved" : "Importación no guardada",
@@ -380,7 +390,7 @@ export function GoOcrImportSheet({
         <Text style={s.urlDisclaimerTxt}>
           {lang === "en"
             ? "GO will read the page and try to detect services automatically. You can always review and correct before saving."
-            : "GO leerá la página e intentará detectar servicios automáticamente. Siempre podrás revisar y corregir antes de guardar."}
+            : "GO leerá la página e intentará detectar el catálogo automáticamente. Siempre podrás revisar y corregir antes de guardar."}
         </Text>
       </View>
     </ScrollView>
@@ -414,7 +424,7 @@ export function GoOcrImportSheet({
       <Text style={s.processingNote}>
         {lang === "en"
           ? "GO will automatically detect names, prices and durations."
-          : "GO detectará nombres, precios y duraciones automáticamente."}
+          : "GO detectará nombres y precios; revisa los datos antes de guardar."}
       </Text>
     </View>
   );
@@ -428,8 +438,8 @@ export function GoOcrImportSheet({
           <Feather name="check-circle" size={13} color={GREEN} />
           <Text style={s.detectedBadgeTxt}>
             {lang === "en"
-              ? `${svcs.length} service${svcs.length !== 1 ? "s" : ""} detected`
-              : `${svcs.length} servicio${svcs.length !== 1 ? "s" : ""} detectado${svcs.length !== 1 ? "s" : ""}`}
+              ? `${svcs.length} item${svcs.length !== 1 ? "s" : ""} detected`
+              : `${svcs.length} entrada${svcs.length !== 1 ? "s" : ""} detectada${svcs.length !== 1 ? "s" : ""}`}
           </Text>
         </View>
         <TouchableOpacity onPress={toggleAll} hitSlop={8}>
@@ -452,11 +462,17 @@ export function GoOcrImportSheet({
             </TouchableOpacity>
 
             <View style={s.svcFields}>
+              {svc.needsReview && <Text style={s.reviewHint}>
+                {lang === "en" ? "Check OCR values before saving" : "Revisa los datos reconocidos antes de guardar"}
+              </Text>}
+              <TouchableOpacity accessibilityRole="button" onPress={() => patchSvc(svc.id, { kind: svc.kind === "product" ? "service" : "product" })}>
+                <Text style={s.toggleAllTxt}>{svc.kind === "product" ? "Producto · cambiar a servicio" : "Servicio · cambiar a producto"}</Text>
+              </TouchableOpacity>
               <TextInput
                 style={[s.svcNameInput, !svc.selected && { color: DIM }]}
                 value={svc.name}
                 onChangeText={v => patchSvc(svc.id, { name: v })}
-                placeholder={lang === "en" ? "Service name" : "Nombre del servicio"}
+                placeholder={lang === "en" ? "Item name" : "Nombre de la entrada"}
                 placeholderTextColor={DIM}
                 returnKeyType="done"
                 editable={svc.selected}
@@ -470,6 +486,10 @@ export function GoOcrImportSheet({
                 editable={svc.selected}
                 maxLength={1000}
               />
+              <TextInput style={s.svcNameInput} value={svc.category} onChangeText={v => patchSvc(svc.id, { category: v })}
+                placeholder={lang === "en" ? "Category (optional)" : "Categoría (opcional)"} placeholderTextColor={DIM} editable={svc.selected} maxLength={80} />
+              <TextInput style={s.svcNameInput} value={svc.variant} onChangeText={v => patchSvc(svc.id, { variant: v })}
+                placeholder={lang === "en" ? "Variant (optional)" : "Variante (opcional)"} placeholderTextColor={DIM} editable={svc.selected} maxLength={80} />
               <View style={s.svcMetaRow}>
                 <View style={s.metaChip}>
                   <TextInput
@@ -485,7 +505,7 @@ export function GoOcrImportSheet({
                   />
                   <Text style={s.metaUnit}>€</Text>
                 </View>
-                <View style={s.metaChip}>
+                {svc.kind === "service" && <View style={s.metaChip}>
                   <TextInput
                     style={s.metaInput}
                     value={svc.durationInput}
@@ -496,7 +516,7 @@ export function GoOcrImportSheet({
                     selectTextOnFocus
                   />
                   <Text style={s.metaUnit}>min</Text>
-                </View>
+                </View>}
               </View>
             </View>
 
@@ -528,8 +548,8 @@ export function GoOcrImportSheet({
           <Feather name="download" size={14} color="#fff" />
           <Text style={s.confirmBtnTxt}>
             {lang === "en"
-              ? `Add ${selectedCount} service${selectedCount !== 1 ? "s" : ""}`
-              : `Añadir ${selectedCount} servicio${selectedCount !== 1 ? "s" : ""}`}
+              ? `Add ${selectedCount} item${selectedCount !== 1 ? "s" : ""}`
+              : `Añadir ${selectedCount} entrada${selectedCount !== 1 ? "s" : ""}`}
           </Text>
         </TouchableOpacity>
       </View>
@@ -563,6 +583,12 @@ export function GoOcrImportSheet({
         <Feather name="refresh-cw" size={14} color={BLUE} />
         <Text style={s.retryBtnTxt}>{lang === "en" ? "Try again" : "Intentar de nuevo"}</Text>
       </TouchableOpacity>}
+      {!!sourceFile && <TouchableOpacity onPress={() => doExtract(undefined, sourceFile)} style={s.retryBtn} activeOpacity={0.8}>
+        <Feather name="refresh-cw" size={14} color={BLUE} />
+        <Text style={s.retryBtnTxt}>{lang === "en" ? "Try again" : "Intentar de nuevo"}</Text>
+      </TouchableOpacity>}
+      {!!sourceFile && /No se encontraron/.test(errorMsg) &&
+        <Text style={s.errorMsg}>{lang === "en" ? "GO AI document interpretation is not available yet." : "La interpretación de documentos con GO IA aún no está disponible."}</Text>}
     </View>
   );
 
@@ -893,6 +919,7 @@ const s = StyleSheet.create({
   },
   errorTitle: { fontSize: 17, fontWeight: "800", color: TEXT, textAlign: "center" },
   errorMsg:   { fontSize: 13, color: GRAY, textAlign: "center", lineHeight: 19, maxWidth: 270 },
+  reviewHint: { fontSize: 12, color: "#A36A18", fontWeight: "600" },
   retryBtn: {
     flexDirection: "row", alignItems: "center", gap: 7,
     paddingVertical: 11, paddingHorizontal: 20,

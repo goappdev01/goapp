@@ -1569,6 +1569,22 @@ export function BookingSearchOverlay({
                         </>}
                       </TouchableOpacity>
                     ))}
+                    {items.some(item => item.catalogKind === "product") && <View testID="booking-public-catalog-products" style={{ gap: 8, marginTop: 12 }}>
+                      <Text style={[s.serviceTitle, { color: accentColor }]}>{lang === "en" ? "Catalogue products" : "Productos del catálogo"}</Text>
+                      {items.filter(item => item.catalogKind === "product").map(item => <View key={item.id}
+                        style={[s.serviceCard, { borderColor: `${accentColor}70`, backgroundColor: "rgba(255,255,255,0.04)", minHeight: showPhotos && hasCatalogPhoto(item) ? 124 : 58, paddingLeft: showPhotos && hasCatalogPhoto(item) ? 128 : undefined }]}>
+                        <CatalogItemPhoto item={item} enabled={showPhotos} absolute size={108} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.serviceTitle}>{item.title}</Text>
+                          {typeof item.catalogMetadata?.category === "string" && !!item.catalogMetadata.category &&
+                            <Text style={s.metaBadgeText}>{item.catalogMetadata.category}</Text>}
+                          {typeof item.catalogMetadata?.variant === "string" && !!item.catalogMetadata.variant &&
+                            <Text style={s.metaBadgeText}>{item.catalogMetadata.variant}</Text>}
+                          {!!item.description && <Text style={s.metaBadgeText}>{item.description}</Text>}
+                        </View>
+                        <Text style={[s.servicePrice, { color: accentColor }]}>{new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: "EUR" }).format(item.price)}</Text>
+                      </View>)}
+                    </View>}
                     {selectedBusiness && <CatalogComplementSelector initialSelected={changeSelection && JSON.stringify(selectedServiceIds)===JSON.stringify(changeSelection.rootIds ?? changeSelection.services.map(service=>service.id))?changeSelection.selectedAssociationIds:undefined} businessId={selectedBusiness.id} rootIds={selectedServiceIds} onChange={setCatalogQuote} repository={demoRepository} accentColor={accentColor} showTotal={!compactServices} showPhotos={showPhotos} />}
                     {serviceSelection && (compactServices ? <View testID="booking-services-total" style={s.servicesTotal}>
                       <Text style={[s.serviceTitle, s.servicesTotalPrice, { color: accentColor }]}>

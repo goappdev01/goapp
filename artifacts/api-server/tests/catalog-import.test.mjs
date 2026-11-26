@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -41,6 +41,14 @@ test('public catalog extraction requires real named price rows and preserves mis
       assert.equal(source.publicCatalogAddress(address), false, address);
     assert.equal(source.publicCatalogAddress('8.8.8.8'), true);
     assert.equal(source.publicCatalogAddress('2001:4860:4860::8888'), true);
+    assert.deepEqual(source.extractCatalogText('TAPAS\nCroquetas 8,50 €\nTortilla 6,00 €\nPeluquería\nCorte 25,50 € · 30 min'), [
+      { name: 'Croquetas', price: 8.5, duration: null, description: '', category: 'TAPAS', needsReview: true },
+      { name: 'Tortilla', price: 6, duration: null, description: '', category: 'TAPAS', needsReview: true },
+      { name: 'Corte', price: 25.5, duration: 30, description: '', category: 'Peluquería', needsReview: false },
+    ]);
+    assert.deepEqual(source.extractCatalogText('Tinte desde 20 €\nPlato del día 8 € 12 €'), []);
+    assert.deepEqual(source.extractCatalogText('BEBIDAS\nRefresco (Grande) 3,50 €')[0],
+      { name: 'Refresco', variant: 'Grande', category: 'BEBIDAS', price: 3.5, duration: null, description: '', needsReview: true });
   } finally { await dispose(); }
 });
 
@@ -70,7 +78,7 @@ test('catalog import checks owner, validates review and only confirms via authen
   const item = { name: 'Corte', description: '', duration: 30, price: 25, capacity: 1 };
   try {
     assert.equal((await post('/confirm', { services: [item] }, false)).status, 401);
-    assert.equal((await post('/extract', { source: 'pdf' })).status, 501);
+    assert.equal((await post('/extract', { source: 'pdf' })).status, 400);
     assert.equal((await post('/confirm', { services: [{ ...item, duration: null }] })).status, 400);
     assert.equal(rpc.length, 0);
     owns = false;
@@ -82,6 +90,9 @@ test('catalog import checks owner, validates review and only confirms via authen
     assert.equal((await result.json()).imported, 1);
     assert.deepEqual(rpc[0].body, { p_business_id: business, p_items: [item] });
     assert.equal(rpc[0].authorization, 'Bearer test');
+    const product = { name: 'Croquetas', description: '', duration: 0, price: 8.5, capacity: 1, kind: 'product', category: 'Tapas', variant: '' };
+    assert.equal((await post('/confirm', { services: [product] })).status, 200);
+    assert.equal(rpc[1].body.p_items[0].kind, 'product');
   } finally {
     globalThis.fetch = oldFetch;
     if (oldUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = oldUrl;
@@ -134,4 +145,144 @@ test('atomic import preserves prior services, skips duplicates and rolls back an
     assert.equal(rows[0].ui_metadata.type,'peluqueria');
     assert.equal(Number(rows[0].price),25.5);
   } finally { await db.close(); }
+});
+
+test('product import remains atomic and outside bookable services configuration', async () => {
+  const { PGlite } = await import('@electric-sql/pglite');
+  const db = new PGlite();
+  const business = '11111111-1111-4111-8111-111111111111';
+  const owner = '22222222-2222-4222-8222-222222222222';
+  const sql = await readFile('supabase/migrations/20261126004000_go_catalog_import_products_variants_v1.sql', 'utf8');
+  try {
+    await db.exec(`create role anon; create role authenticated; create schema auth;
+      create function auth.uid() returns uuid language sql stable as $$
+        select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
+      grant usage on schema auth to authenticated; grant execute on function auth.uid() to authenticated;
+      create table public.businesses(id uuid primary key, owner_id uuid not null, verified boolean not null);
+      create table public.business_settings(business_id uuid primary key, payload jsonb not null);
+      create table public.services(id uuid primary key default gen_random_uuid(), business_id uuid not null,
+        name text not null, description text, duration_minutes integer not null, price numeric(12,2),
+        currency text not null, active boolean not null, ui_metadata jsonb not null);
+      grant usage on schema public to authenticated; grant select on public.businesses to authenticated;`);
+    await db.query('insert into public.businesses values($1,$2,true)', [business, owner]);
+    await db.query('insert into public.business_settings values($1,$2::jsonb)', [business, JSON.stringify({ services: [] })]);
+    await db.exec(sql);
+    await db.exec('set role authenticated');
+    await db.query("select set_config('request.jwt.claim.sub',$1,false)", [owner]);
+    const product = { name: 'Croquetas', description: '', price: 8.5, duration: 0, capacity: 1,
+      kind: 'product', category: 'Tapas', variant: '' };
+    const invoke = items => db.query('select public.go_import_catalog_services($1::uuid,$2::jsonb) result', [business, JSON.stringify(items)]);
+    assert.equal((await invoke([product])).rows[0].result.imported, 1);
+    assert.equal((await invoke([product])).rows[0].result.imported, 0);
+    assert.equal((await invoke([{ ...product, variant: 'Grande' }])).rows[0].result.imported, 1);
+    await assert.rejects(() => invoke([{ ...product, name: 'Tortilla' }, { ...product, name: 'Paella', price: -1 }]));
+    await db.exec('reset role');
+    const row = (await db.query("select duration_minutes,ui_metadata from public.services where ui_metadata->>'variant'='' ")).rows[0];
+    const payload = (await db.query('select payload from public.business_settings')).rows[0].payload;
+    assert.equal(row.duration_minutes, 0);
+    assert.equal(row.ui_metadata.catalogKind, 'product');
+    assert.equal(row.ui_metadata.category, 'Tapas');
+    assert.deepEqual(payload.services, []);
+    assert.equal((await db.query('select count(*)::integer n from public.services')).rows[0].n, 2);
+  } finally { await db.close(); }
+});
+
+test('document intake rejects wrong MIME, oversized and decompression-prone images before OCR', async () => {
+  const { module: doc, dispose } = await compiled('src/lib/catalogDocument.ts');
+  try {
+    const png = Buffer.alloc(100);
+    Buffer.from([137,80,78,71,13,10,26,10]).copy(png);
+    png.writeUInt32BE(500, 16); png.writeUInt32BE(500, 20);
+    assert.equal(doc.catalogDocumentBytes('image', 'image/png', png.toString('base64')).length, 100);
+    assert.throws(() => doc.catalogDocumentBytes('image', 'image/jpeg', png.toString('base64')), /JPG|PNG/);
+    png.writeUInt32BE(6001, 16);
+    assert.throws(() => doc.catalogDocumentBytes('image', 'image/png', png.toString('base64')), /resolución/);
+    const pdf = Buffer.from('%PDF-1.7\nsynthetic document');
+    assert.equal(doc.catalogDocumentBytes('pdf', 'application/pdf', pdf.toString('base64')).length, pdf.length);
+    assert.throws(() => doc.catalogDocumentBytes('pdf', 'image/png', pdf.toString('base64')));
+    assert.throws(() => doc.catalogDocumentBytes('pdf', 'application/pdf', '%%%'));
+    const tsv = 'level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n'
+      + '5\t1\t1\t1\t1\t1\t10\t20\t80\t20\t92\tCroquetas\n'
+      + '5\t1\t2\t1\t1\t1\t260\t20\t50\t20\t94\t8,50\n'
+      + '5\t1\t2\t1\t1\t2\t320\t20\t15\t20\t95\t€\n';
+    assert.equal(doc.catalogTsvText(tsv), 'Croquetas 8,50 €');
+  } finally { await dispose(); }
+});
+
+test('catalog usage is aggregate and admin-only in an isolated database', async () => {
+  const { PGlite } = await import('@electric-sql/pglite');
+  const db = new PGlite();
+  const business = '11111111-1111-4111-8111-111111111111';
+  const owner = '22222222-2222-4222-8222-222222222222';
+  const admin = '33333333-3333-4333-8333-333333333333';
+  try {
+    await db.exec(`create role anon; create role authenticated; create schema auth;
+      create function auth.uid() returns uuid language sql stable as $$
+        select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
+      grant usage on schema auth to authenticated; grant execute on function auth.uid() to authenticated;
+      create table public.businesses(id uuid primary key,owner_id uuid,verified boolean);
+      create table public.admin_memberships(user_id uuid primary key,active boolean,permissions text[]);
+      grant usage on schema public to authenticated;`);
+    await db.query('insert into public.businesses values($1,$2,true)', [business, owner]);
+    await db.query("insert into public.admin_memberships values($1,true,array['admin.access'])", [admin]);
+    await db.exec(await readFile('supabase/migrations/20261126003000_go_catalog_import_usage_v1.sql','utf8'));
+    const become = async id => { await db.exec('reset role; set role authenticated');
+      await db.query("select set_config('request.jwt.claim.sub',$1,false)", [id]); };
+    const record = (method, outcome) => db.query('select public.go_catalog_import_record($1::uuid,$2,$3)', [business,method,outcome]);
+    await become(admin);
+    await assert.rejects(() => record('ocr','success'), /Empresa no autorizada/);
+    await become(owner);
+    await record('ocr','success'); await record('direct','insufficient');
+    await assert.rejects(() => db.query('select public.go_catalog_import_usage()'), /ADMIN no autorizado/);
+    await become(admin);
+    const rows = (await db.query('select public.go_catalog_import_usage() usage')).rows[0].usage;
+    assert.equal(rows.length, 2);
+    assert.equal(rows.find(row => row.method === 'ocr').count, 1);
+    assert.equal(JSON.stringify(rows).includes(owner), false);
+  } finally { await db.close(); }
+});
+
+test('document pipeline OCRs only the image-only PDF page and cleans temporary files (simulated CLI)', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'go-catalog-test-'));
+  const outfile = path.join(dir, 'module.mjs');
+  const calls = [];
+  globalThis.__catalogCliCalls = calls;
+  globalThis.__catalogCliMode = 'mixed';
+  try {
+    await build({ entryPoints: ['src/lib/catalogDocument.ts'], outfile, bundle: true, platform: 'node', format: 'esm',
+      banner: { js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);" },
+      plugins: [{ name: 'synthetic-cli', setup(build) {
+        build.onResolve({ filter: /^node:child_process$/ }, () => ({ path: 'cli', namespace: 'synthetic' }));
+        build.onLoad({ filter: /.*/, namespace: 'synthetic' }, () => ({ loader: 'js', contents: `
+          import {promisify} from 'node:util';
+          export function execFile(){}
+          execFile[promisify.custom]=async(cmd,args)=>{
+            globalThis.__catalogCliCalls.push([cmd,...args]);
+            if(cmd==='pdfinfo')return {stdout:globalThis.__catalogCliMode==='direct'?'Pages: 2\\n':'Pages: 3\\n'};
+            if(cmd==='pdftotext')return {stdout:globalThis.__catalogCliMode==='direct'?(args[1]==='1'?'Tinte 45,00 € 60 min':'Peinado 20,00 € 30 min'):args[1]==='2'?'':args[1]==='1'?'Tinte 45,00 € 60 min':'Peinado 20,00 € 30 min'};
+            if(cmd==='tesseract')return {stdout:'level\\tpage_num\\tblock_num\\tpar_num\\tline_num\\tword_num\\tleft\\ttop\\twidth\\theight\\tconf\\ttext\\n5\\t1\\t1\\t1\\t1\\t1\\t10\\t20\\t80\\t20\\t90\\tCroquetas\\n5\\t1\\t2\\t1\\t1\\t1\\t200\\t20\\t60\\t20\\t90\\t8,50\\n5\\t1\\t2\\t1\\t1\\t2\\t270\\t20\\t10\\t20\\t90\\t€\\n'};
+            if(cmd==='pdftoppm')return {stdout:''};
+            throw Error('unexpected CLI');
+          }` }));
+      } }] });
+    const doc = await import(pathToFileURL(outfile));
+    const before = (await readdir(tmpdir())).filter(name => name.startsWith('go-catalog-')).sort();
+    const result = await doc.extractCatalogDocument('pdf','application/pdf',Buffer.from('%PDF-1.7\nsynthetic').toString('base64'));
+    assert.equal(result.method, 'mixed');
+    assert.deepEqual(result.services.map(row => row.name), ['Tinte','Croquetas','Peinado']);
+    assert.equal(calls.filter(row => row[0] === 'tesseract').length, 1);
+    assert.equal(calls.filter(row => row[0] === 'pdftotext').length, 3);
+    assert.deepEqual((await readdir(tmpdir())).filter(name => name.startsWith('go-catalog-')).sort(), before);
+    globalThis.__catalogCliMode = 'direct'; calls.length = 0;
+    const direct = await doc.extractCatalogDocument('pdf','application/pdf',Buffer.from('%PDF-1.7\nsynthetic').toString('base64'));
+    assert.equal(direct.method, 'direct');
+    assert.deepEqual(direct.services.map(row => row.name), ['Tinte','Peinado']);
+    assert.equal(calls.filter(row => row[0] === 'tesseract').length, 0);
+    const png = Buffer.alloc(100);
+    Buffer.from([137,80,78,71,13,10,26,10]).copy(png);
+    png.writeUInt32BE(500, 16); png.writeUInt32BE(500, 20);
+    const image = await doc.extractCatalogDocument('image','image/png',png.toString('base64'));
+    assert.equal(image.method, 'ocr');
+    assert.deepEqual(image.services.map(row => row.name), ['Croquetas']);
+  } finally { delete globalThis.__catalogCliCalls; delete globalThis.__catalogCliMode; await rm(dir, { recursive: true, force: true }); }
 });

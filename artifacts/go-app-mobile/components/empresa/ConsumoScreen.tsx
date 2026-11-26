@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
 import { Feather } from "@expo/vector-icons";
 import { METRICAS_VOLUMEN, BLOQUES_VOLUMEN } from "@/data/mockEconomia";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
+import { getCatalogImportUsage, type CatalogImportUsage } from "@/data/catalogImport";
 
 const LIGHT = { BG: "#F7F8FA", CARD: "#FFFFFF", BORD: "rgba(0,0,0,0.08)", TEXT: "#111827", GRAY: "#6B7280", DIM: "#9CA3AF", AVATAR_BG: "#EFF6FF", AVATAR_TXT: "#4A80BD" };
 const DARK  = { BG: "#0D0E11", CARD: "#1A1B1F", BORD: "rgba(255,255,255,0.08)", TEXT: "#FFFFFF", GRAY: "rgba(255,255,255,0.50)", DIM: "rgba(255,255,255,0.28)", AVATAR_BG: "rgba(74,128,189,0.20)", AVATAR_TXT: "#6aabff" };
@@ -37,10 +39,25 @@ const MOCK_POR_DEPT_ES = [
 
 export function ConsumoScreen({ guidanceLevel: _g = 5, dark = false }: { guidanceLevel?: number; dark?: boolean }) {
   const { lang } = useLanguage();
+  const admin = useAdminAccess();
+  const [catalogUsage, setCatalogUsage] = useState<CatalogImportUsage | null>(null);
+  const [catalogError, setCatalogError] = useState("");
+  useEffect(() => {
+    let active = true;
+    setCatalogUsage(null); setCatalogError("");
+    if (admin.allowed && admin.userId) void getCatalogImportUsage()
+      .then(usage => { if (active) setCatalogUsage(usage); })
+      .catch(() => { if (active) setCatalogError(lang === "en" ? "Import usage unavailable" : "Uso de importaciones no disponible"); });
+    return () => { active = false; };
+  }, [admin.allowed, admin.userId, lang]);
   const C = dark ? DARK : LIGHT;
   const v = METRICAS_VOLUMEN;
   const pct = Math.min(100, Math.round((v.usoTotal / v.limiteIncluido) * 100));
   const depts = lang === "en" ? MOCK_POR_DEPT : MOCK_POR_DEPT_ES;
+  const attempts = catalogUsage?.days.reduce((sum, row) => sum + row.count, 0) ?? 0;
+  const insufficient = catalogUsage?.days.filter(row => row.outcome === "insufficient")
+    .reduce((sum, row) => sum + row.count, 0) ?? 0;
+  const insufficientPercent = attempts ? Math.round(insufficient / attempts * 100) : 0;
 
   return (
     <ScrollView style={[s.container, { backgroundColor: C.BG }]} showsVerticalScrollIndicator={false}>
@@ -54,6 +71,18 @@ export function ConsumoScreen({ guidanceLevel: _g = 5, dark = false }: { guidanc
           <View style={[s.progressFill, { width: `${pct}%` as any, backgroundColor: pct > 85 ? "#ef4444" : "#3D9A84" }]} />
         </View>
         <Text style={[s.pctTxt, { color: C.GRAY }]}>{pct}% {lang === "en" ? "used" : "utilizado"}</Text>
+      </View>
+
+      <View style={[s.heroCard, { backgroundColor: C.CARD, borderColor: C.BORD }]}>
+        <Text style={[s.heroLabel, { color: C.TEXT }]}>{lang === "en" ? "Catalogue imports · last 30 days" : "Importaciones de catálogo · últimos 30 días"}</Text>
+        {catalogUsage ? <>
+          <Text style={[s.heroSub, { color: C.TEXT }]}>OCR: {catalogUsage.days.filter(row => row.method === "ocr" || row.method === "mixed").reduce((sum, row) => sum + (row.outcome === "success" ? row.count : 0), 0)}</Text>
+          <Text style={[s.heroSub, { color: C.TEXT }]}>{lang === "en" ? "Direct extraction" : "Extracción directa"}: {catalogUsage.days.filter(row => row.method === "direct").reduce((sum, row) => sum + (row.outcome === "success" ? row.count : 0), 0)}</Text>
+          <Text style={[s.heroSub, { color: C.TEXT }]}>{lang === "en" ? "Insufficient or failed" : "Insuficientes o fallidas"}: {catalogUsage.days.filter(row => row.outcome !== "success").reduce((sum, row) => sum + row.count, 0)}</Text>
+          <Text style={[s.heroSub, { color: C.TEXT }]}>{lang === "en" ? "Needs further review" : "Requiere revisión adicional"}: {insufficientPercent}%</Text>
+          {insufficientPercent >= 30 && attempts >= 10 && <Text style={[s.heroSub, { color: "#C97040" }]}>{lang === "en" ? "Review the increase in insufficient extractions." : "Revisa el aumento de extracciones insuficientes."}</Text>}
+          <Text style={[s.heroSub, { color: C.GRAY }]}>GO IA: {catalogUsage.aiAvailable ? catalogUsage.aiCalls : (lang === "en" ? "Unavailable" : "No disponible")}</Text>
+        </> : <Text style={[s.heroSub, { color: C.GRAY }]}>{catalogError || (lang === "en" ? "Loading actual usage…" : "Cargando uso real…")}</Text>}
       </View>
 
       <View style={s.grid}>

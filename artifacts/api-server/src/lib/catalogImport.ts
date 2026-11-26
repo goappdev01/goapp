@@ -2,7 +2,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { request } from "node:https";
 
-export type ImportedService = { name: string; price: number | null; duration: number | null; description: string };
+export type ImportedService = { name: string; price: number | null; duration: number | null; description: string; category?: string; variant?: string; needsReview?: boolean };
 export class CatalogImportError extends Error {
   constructor(public code: string, message: string) { super(message); }
 }
@@ -118,4 +118,43 @@ export function extractCatalogHtml(html: string): ImportedService[] {
     if (results.length === 41) break;
   }
   return results;
+}
+
+/** Read only explicit name/price pairs. Headings are hints, never products. */
+export function extractCatalogText(text: string): ImportedService[] {
+  const rows: ImportedService[] = [];
+  const seen = new Set<string>();
+  let category = "";
+  for (const original of text.replace(/\r/g, "").split("\n")) {
+    const line = original.replace(/[\t ]+/g, " ").trim();
+    if (line.length < 2 || line.length > 240) continue;
+    if (!/\d/.test(line) && line.length <= 55 && /^[\p{L}\s/&-]+$/u.test(line)) {
+      category = line; continue;
+    }
+    if (/\b(?:desde|hasta|a partir de)\b/i.test(line)) continue;
+    const duration = line.match(/\b(\d{1,3})\s*min(?:utos?)?\b/i);
+    const withoutDuration = duration ? line.replace(duration[0], "").replace(/[·|\s]+$/, "").trim() : line;
+    if ([...withoutDuration.matchAll(/\b\d+(?:[,.]\d{1,2})?\s*(?:€|EUR)(?=\s|$)/gi)].length > 1) continue;
+    const matches = [...withoutDuration.matchAll(/(?:^|[\s·.])((?:\d{1,3}\.)?\d{1,5}(?:[,.]\d{1,2})?)\s*(?:€|EUR)?(?=\s*$|\s*[|·;])/gi)];
+    if (matches.length !== 1) continue;
+    const price = matches[0];
+    const amount = Number(price[1].replace(/\.(?=\d{3}(?:[,.]|$))/g, "").replace(",", "."));
+    if (!Number.isFinite(amount) || amount > 100000) continue;
+    const minutes = duration ? Number(duration[1]) : null;
+    if (minutes !== null && (minutes < 1 || minutes > 1440)) continue;
+    const before = withoutDuration.slice(0, price.index).replace(/[.·:|–—-]+$/g, "").trim();
+    const [namePart, ...detail] = before.split(/\s+[–—]\s+/);
+    const fullName = namePart.trim();
+    const explicitVariant = fullName.match(/^(.*?)\s+\(([^()]{2,50})\)$/);
+    const name = explicitVariant ? explicitVariant[1].trim() : fullName;
+    const variant = explicitVariant?.[2].trim() ?? "";
+    if (name.length < 2 || name.length > 120 || !/[\p{L}]/u.test(name)) continue;
+    const key = `${category}|${name}|${variant}`.toLocaleLowerCase("es");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ name, price: amount, duration: minutes, description: detail.join(" — "),
+      ...(category ? { category } : {}), ...(variant ? { variant } : {}), needsReview: !duration });
+    if (rows.length > 40) break;
+  }
+  return rows;
 }
