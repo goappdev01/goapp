@@ -1,3 +1,6 @@
+import { readDeviceLocation } from "@/lib/deviceLocation";
+import type { ForegroundLocationAdapter } from "@/lib/locationAccess";
+
 export type LocalTransportKind = "taxi" | "public";
 export type TransportLocality = { city: string; country: string };
 type OfficialLink = { name: string; url: string; purpose: "booking" | "planner" | "contact"; evidence: string };
@@ -52,21 +55,18 @@ export async function openLocalTransport(target: TransportTarget, openURL: (url:
   await openURL(target.url);
 }
 
-type LocationAdapter = {
-  getForegroundPermissionsAsync: () => Promise<{ status: string }>;
-  getCurrentPositionAsync: (options: { accuracy: number }) => Promise<{ coords: { latitude: number; longitude: number } }>;
+type LocationAdapter = ForegroundLocationAdapter & {
   reverseGeocodeAsync: (point: { latitude: number; longitude: number }) => Promise<Array<{ city?: string | null; isoCountryCode?: string | null; country?: string | null }>>;
-  Accuracy: { Lowest: number };
 };
 /** Only call after the dedicated geocoding disclosure was explicitly accepted.
- * Reuse existing native location APIs, with no new permission request, server,
+ * Reuse the native foreground authorization, with no new server,
  * stored coordinates, background tracking or operator/browsing location payload.
  */
 export async function locateTransportLocality(adapter: LocationAdapter, geocoderConsent: boolean,
   isActive: () => boolean = () => true): Promise<TransportLocality | null> {
   if (!geocoderConsent) throw Error("TRANSPORT_GEOCODER_CONSENT_REQUIRED");
-  if (!isActive() || (await adapter.getForegroundPermissionsAsync()).status !== "granted" || !isActive()) return null;
-  const { coords } = await adapter.getCurrentPositionAsync({ accuracy: adapter.Accuracy.Lowest });
+  if (!isActive()) return null;
+  const { coords } = await readDeviceLocation(adapter, { accuracy: adapter.Accuracy.Lowest, isActive });
   if (!isActive()) return null;
   if (!Number.isFinite(coords.latitude) || !Number.isFinite(coords.longitude) || Math.abs(coords.latitude) > 90 || Math.abs(coords.longitude) > 180) return null;
   // City resolution needs no street-level precision. Ask for a fresh coarse fix

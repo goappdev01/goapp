@@ -4,12 +4,13 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import vm from "node:vm";
+const deviceLocation = createRequire(import.meta.url)('./helpers/device-location.cjs')();
 const ts = createRequire(path.join(process.cwd(),"package.json"))("typescript");
 const src = name => readFileSync(name,"utf8");
 const transpile = name => ts.transpileModule(src(name),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 function moduleFrom(name, imports = {}) {
   const exports = {};
-  vm.runInNewContext(transpile(name),{exports,require:key => imports[key] ?? {},console,Set,Map});
+  vm.runInNewContext(transpile(name),{exports,require:key => key==='@/lib/deviceLocation'?deviceLocation:imports[key] ?? {},console,Set,Map});
   return exports;
 }
 const country = moduleFrom("utils/countryConfig.ts");
@@ -54,7 +55,9 @@ test("invalid, foreign-prefix and oversized numbers never produce an internation
 });
 function gpsFixture({permission="granted",geoFails=false,positionFails=false}={}){
   const calls=[];
-  return {calls,adapter:{Accuracy:{Balanced:3},
+  return {calls,adapter:{Accuracy:{Lowest:1,Balanced:3},
+    async hasServicesEnabledAsync(){return true},
+    async getForegroundPermissionsAsync(){calls.push("check");return {status:permission,canAskAgain:true}},
     async requestForegroundPermissionsAsync(){calls.push("permission");return {status:permission}},
     async getCurrentPositionAsync(options){calls.push("position");assert.equal(options.accuracy,3);if(positionFails)throw Error("GPS unavailable");return {coords:{latitude:40.4168,longitude:-3.7038}}},
     async reverseGeocodeAsync(){calls.push("address");if(geoFails)throw Error("Address unavailable");return [{street:"Fictitious street",streetNumber:"1",city:"Test city"}]},
@@ -64,30 +67,30 @@ test("GPS asks permission only when invoked and can explicitly skip address look
   const f=gpsFixture();assert.deepEqual(f.calls,[]);
   let saved;
   const result=await api.readBusinessDeviceLocation(f.adapter,{allowAddressLookup:false,onCoordinates:async coords=>{f.calls.push("save");saved=plain(coords)}});
-  assert.deepEqual(f.calls,["permission","position","save"]);assert.deepEqual(saved,{latitude:40.4168,longitude:-3.7038});
+  assert.deepEqual(f.calls,["check","position","check","save"]);assert.deepEqual(saved,{latitude:40.4168,longitude:-3.7038});
   assert.equal(result.status,"coordinates");assert.equal(result.address,undefined);
 });
 test("denied location permission neither reads device position nor writes data",async()=>{
   const f=gpsFixture({permission:"denied"});let writes=0;
   const result=await api.readBusinessDeviceLocation(f.adapter,{allowAddressLookup:false,onCoordinates:()=>{writes++}});
-  assert.equal(result.status,"denied");assert.deepEqual(f.calls,["permission"]);assert.equal(writes,0);
+  assert.equal(result.status,"denied");assert.deepEqual(f.calls,["check","permission"]);assert.equal(writes,0);
 });
 test("address lookup failure keeps coordinates and never invents an address",async()=>{
   const f=gpsFixture({geoFails:true});let saved;
   const result=await api.readBusinessDeviceLocation(f.adapter,{allowAddressLookup:true,onCoordinates:async coords=>{f.calls.push("save");saved=plain(coords)}});
-  assert.deepEqual(f.calls,["permission","position","save","address"]);assert.equal(result.status,"coordinates");assert.equal(result.address,undefined);assert.ok(saved);
+  assert.deepEqual(f.calls,["check","position","check","save","address"]);assert.equal(result.status,"coordinates");assert.equal(result.address,undefined);assert.ok(saved);
 });
 test("existing real lookup runs after coordinates persist; failed save does not claim success",async()=>{
   const f=gpsFixture();
   const result=await api.readBusinessDeviceLocation(f.adapter,{allowAddressLookup:true,onCoordinates:()=>{f.calls.push("save")}});
-  assert.deepEqual(f.calls,["permission","position","save","address"]);assert.equal(result.status,"address");
+  assert.deepEqual(f.calls,["check","position","check","save","address"]);assert.equal(result.status,"address");
   const fail=gpsFixture();await assert.rejects(api.readBusinessDeviceLocation(fail.adapter,{allowAddressLookup:false,onCoordinates:()=>{throw Error("disk failure")}}),/disk failure/);
-  assert.deepEqual(fail.calls,["permission","position"]);
+  assert.deepEqual(fail.calls,["check","position","check"]);
 });
 test("position failure is reported before any write or address lookup",async()=>{
   const f=gpsFixture({positionFails:true});let writes=0;
-  await assert.rejects(api.readBusinessDeviceLocation(f.adapter,{allowAddressLookup:true,onCoordinates:()=>writes++}),/GPS unavailable/);
-  assert.deepEqual(f.calls,["permission","position"]);assert.equal(writes,0);
+  await assert.rejects(api.readBusinessDeviceLocation(f.adapter,{allowAddressLookup:true,onCoordinates:()=>writes++}),/ubicación/);
+  assert.deepEqual(f.calls,["check","position","check"]);assert.equal(writes,0);
 });
 test("wizard uses saved data for completion, awaits writes and does not flag skipped pages",()=>{
   const source=src("components/empresa/EmpresaConfigScreen.tsx");

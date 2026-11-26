@@ -6,7 +6,7 @@ import vm from "node:vm";
 const require = createRequire(import.meta.url), ts = require("typescript");
 function load(file, modules, globals = {}) {
   const context = { exports: {}, console, Date, Error, setTimeout, clearTimeout, ...globals,
-    require(name) { if (name in modules) return modules[name]; throw Error("Unexpected " + name); } };
+    require(name) { if(name==='@/lib/deviceLocation')return require('./helpers/device-location.cjs')(); if (name in modules) return modules[name]; throw Error("Unexpected " + name); } };
   vm.runInNewContext(ts.transpileModule(readFileSync(file, "utf8"), {
     compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, context);
@@ -111,13 +111,13 @@ test("current location remembers a modality and radius, with no coordinates or b
   assert.equal(value.zone,undefined); assert.doesNotMatch(JSON.stringify(value),/latitude|longitude|Cieza/); f.unmount();
   let calls=0;
   const next=assistant(preferenceModule(d.storage),owner,{ location: {
-    getForegroundPermissionsAsync: async () => { calls++; return {granted:true}; },
+    Accuracy:{Lowest:1,Balanced:3},hasServicesEnabledAsync:async()=>true,getForegroundPermissionsAsync: async () => { calls++; return {granted:true,status:"granted"}; },
     getLastKnownPositionAsync: async () => ({coords:madrid}), reverseGeocodeAsync: async () => [{city:"Madrid"}],
   } });
   await next.ready(); next.render().openZonePanel(); let a=next.render();
   assert.equal(calls,0); assert.equal(a.zone,null); assert.equal(a.pendingPlace,null);
   assert.equal(a.radiusText,"2"); assert.equal(a.saveZone,true);
-  const gps=await a.gpsZone(true); assert.equal(calls,1); assert.equal(gps.radiusKm,2); a.pickPlace(gps,"gps");
+  const gps=await a.gpsZone(true); assert.equal(calls,2); assert.equal(gps.radiusKm,2); a.pickPlace(gps,"gps");
   a=next.render(); await a.chooseZone(a.pendingPlace,a.pendingPlace.source);
   assert.equal(next.render().zone.longitude,madrid.longitude); assert.equal(d.writes.length,1); next.unmount();
 });
@@ -222,12 +222,12 @@ test("scope detection uses local identity and existing DEMO presentation, discar
 test("temporary permission revalidation preserves a GPS selection without cancelling the active request", async () => {
   const d=disk(), api=preferenceModule(d.storage), permission=deferred();
   await api.writeAssistantZonePreference(owner,{mode:"fixed",zone:{...cieza,radiusKm:5}},async()=>true);
-  const f=assistant(api,owner,{location:{getForegroundPermissionsAsync:()=>permission.promise,
+  const f=assistant(api,owner,{location:{Accuracy:{Lowest:1,Balanced:3},hasServicesEnabledAsync:async()=>true,getForegroundPermissionsAsync:()=>permission.promise,
     getLastKnownPositionAsync:async()=>({coords:madrid}),reverseGeocodeAsync:async()=>[{city:"Madrid"}]}});
   await f.ready(); f.render().openZonePanel(); const pending=f.render().work("Obteniendo ubicación…",async token=>{
     const gps=await f.render().gpsZone(true); f.render().check(token); f.render().pickPlace(gps,"gps");
   });
-  f.scopeReady(false); permission.resolve({granted:true}); await pending;
+  f.scopeReady(false); permission.resolve({granted:true,status:"granted"}); await pending;
   f.scopeReady(true); await f.ready();
   assert.equal(f.render().pendingPlace.source,"gps"); assert.equal(f.render().pendingPlace.latitude,madrid.latitude);
   assert.equal(f.render().habitualZone.zone.label,cieza.label);

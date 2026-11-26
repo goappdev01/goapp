@@ -1,7 +1,7 @@
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),vm=require('node:vm'),{pathToFileURL,fileURLToPath}=require('node:url');
 const life=require('./react-lifecycle.cjs'),{React,ts,createRoot,document}=life;
 const compile=s=>ts.transpileModule(s,{compilerOptions:{alwaysStrict:false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
-const load=(file,imports={},globals={})=>{const c={exports:{},Date,Intl,URL,Error,TypeError,RangeError,console,setTimeout,clearTimeout,Promise,...globals,require:n=>n==='react'?React:n in imports?imports[n]:n==='expo-linear-gradient'?{LinearGradient:'Gradient'}:n==='@/components/ui/GoNavigationFloating'?{GoNavigationFloating:({children})=>React.createElement('div',{},children)}:(()=>{throw Error('Unexpected '+n+' in '+file)})()};vm.runInNewContext(compile(fs.readFileSync(file,'utf8')),c);return c.exports;};
+const load=(file,imports={},globals={})=>{const c={exports:{},Date,Intl,URL,Error,TypeError,RangeError,console,setTimeout,clearTimeout,Promise,...globals,require:n=>n==='react'?React:n==='@/lib/deviceLocation'?require('./device-location.cjs')(imports['react-native']):n in imports?imports[n]:n==='expo-linear-gradient'?{LinearGradient:'Gradient'}:n==='@/components/ui/GoNavigationFloating'?{GoNavigationFloating:({children})=>React.createElement('div',{},children)}:(()=>{throw Error('Unexpected '+n+' in '+file)})()};vm.runInNewContext(compile(fs.readFileSync(file,'utf8')),c);return c.exports;};
 const plain=x=>JSON.parse(JSON.stringify(x));
 const settle=fn=>React.act(async()=>{await fn?.();for(let i=0;i<10;i++)await Promise.resolve();});
 async function diskFixture({storePath='lib/unifiedNoteStore.ts'}={}){

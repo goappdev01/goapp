@@ -1,4 +1,5 @@
 import * as Location from "expo-location";
+import { readDeviceLocation } from "@/lib/deviceLocation";
 import { useEffect, useRef, useState } from "react";
 
 export type WeatherHourData = {
@@ -63,7 +64,7 @@ const EMPTY: WeatherContextData = {
   dayNightProgress: getDefaultDayProgress(),
 };
 
-export function useWeatherContext(): WeatherContextData {
+export function useWeatherContext(enabled = true): WeatherContextData {
   const [state, setState] = useState<WeatherContextData>(EMPTY);
   const sunriseRef = useRef<Date | null>(null);
   const sunsetRef = useRef<Date | null>(null);
@@ -83,17 +84,13 @@ export function useWeatherContext(): WeatherContextData {
 
   useEffect(() => {
     let cancelled = false;
+    if (!enabled) { setState(prev => ({ ...prev, loading: false })); return; }
 
     async function init() {
-      const { status } = await Location.requestForegroundPermissionsAsync().catch(() => ({ status: "denied" as const }));
-
-      if (status !== "granted") {
-        if (!cancelled) setState((prev) => ({ ...prev, loading: false, hasLocation: false }));
-        return;
-      }
-
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Low,
+      // Weather never prompts on mount. A visible calendar can reuse a current
+      // foreground grant; it does not authorize a new location-sharing flow.
+      const loc = await readDeviceLocation(Location, {
+        accuracy: Location.Accuracy.Low, requestPermission: false, isActive: () => !cancelled,
       }).catch(() => null);
 
       if (cancelled || !loc) {
@@ -104,7 +101,7 @@ export function useWeatherContext(): WeatherContextData {
       const { latitude, longitude } = loc.coords;
       const url =
         `https://api.open-meteo.com/v1/forecast` +
-        `?latitude=${latitude.toFixed(4)}&longitude=${longitude.toFixed(4)}` +
+        `?latitude=${latitude.toFixed(2)}&longitude=${longitude.toFixed(2)}` +
         `&hourly=temperature_2m,precipitation_probability,weathercode` +
         `&daily=weathercode,temperature_2m_max,temperature_2m_min,sunrise,sunset,windspeed_10m_max,precipitation_probability_max` +
         `&timezone=auto&forecast_days=7`;
@@ -196,7 +193,7 @@ export function useWeatherContext(): WeatherContextData {
     });
 
     return () => { cancelled = true; };
-  }, []);
+  }, [enabled]);
 
   return state;
 }

@@ -309,6 +309,7 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
         if (realCompanyManager && key === "./DemoCompanyManager") return load("components/empresa/DemoCompanyManager.tsx");
         if (key === "@/hooks/useGoDockPreference") return load("hooks/useGoDockPreference.ts");
         if (key === "@/hooks/useConfigPanelPreference") return load("hooks/useConfigPanelPreference.ts");
+        if (key === "@/lib/deviceLocation") return require("./tests/helpers/device-location.cjs")(native);
         if (key in imports) return imports[key];
         if (key === "@/theme/goAssistantColors") return load("theme/goAssistantColors.ts");
         if (key === "./CatalogAssociationManager") return { CatalogAssociationManager: () => null };
@@ -1220,8 +1221,11 @@ test("repeated draft values do not let an intermediate save acknowledge a later 
 });
 
 function nativeBusinessGPS(f,{permission="granted",address=true,onPermission=()=>{},waitForAddress}={}){
- const calls=[];return {calls,adapter:{Accuracy:{Balanced:3},
-  async requestForegroundPermissionsAsync(){calls.push("permission");onPermission();return {status:permission}},
+ let status="undetermined";
+ const calls=[];return {calls,adapter:{Accuracy:{Lowest:1,Balanced:3},
+  async hasServicesEnabledAsync(){return true},
+  async getForegroundPermissionsAsync(){return {status,canAskAgain:true}},
+  async requestForegroundPermissionsAsync(){calls.push("permission");onPermission();status=permission;return {status,canAskAgain:true}},
   async getCurrentPositionAsync(){calls.push("position");return {coords:{latitude:40.4168,longitude:-3.7038}}},
   async reverseGeocodeAsync(){calls.push("address");assert.deepEqual(plain(f.store.getSnapshot().config.coordinates),{latitude:40.4168,longitude:-3.7038});if(waitForAddress)await waitForAddress;return address?[{street:"Calle de prueba",streetNumber:"12",city:"Madrid",country:"España"}]:[{city:"Madrid"}]},
  }};

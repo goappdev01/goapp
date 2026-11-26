@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as Location from "expo-location";
+import { readDeviceLocation, offerLocationSettings } from "@/lib/deviceLocation";
 import { getAuthenticatedUserId } from "@/data/booking";
 import {
   assistantZoneKey, readAssistantZonePreference, writeAssistantZonePreference, sameAssistantZonePreference,
@@ -255,15 +256,17 @@ export function useBookingAssistant({ visible = true, scope = null, scopeReady =
     say(text);
   };
   async function gpsZone(askPermission: boolean) {
-    let permission = await Location.getForegroundPermissionsAsync();
-    if (!permission.granted && askPermission)
-      permission = await Location.requestForegroundPermissionsAsync();
-    if (!permission.granted) return null;
+    const expectedScope = currentScope.current;
     let result;
     try {
-      result = (await Location.getLastKnownPositionAsync({ maxAge: 300000 })) ||
-        await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-    } catch { throw new Error("No se pudieron obtener coordenadas. Revisa la ubicación del dispositivo o escribe la zona."); }
+      result = await readDeviceLocation(Location, { requestPermission: askPermission, accuracy: Location.Accuracy.Balanced, lastKnownMaxAgeMs: 300000,
+        isActive: () => mounted.current && currentScope.current === expectedScope });
+    } catch (error) {
+      if (askPermission) offerLocationSettings(error);
+      if (!askPermission) return null;
+      if (["permission-denied", "permission-blocked"].includes((error as {code?:string}).code || "")) return null;
+      throw error;
+    }
     const { latitude, longitude } = result.coords;
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180)
       throw new Error("El dispositivo no ha devuelto coordenadas válidas. Puedes escribir la zona.");

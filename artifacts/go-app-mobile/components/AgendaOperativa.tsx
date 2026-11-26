@@ -3786,7 +3786,7 @@ export function AgendaOperativa({
   }, [calView]);
 
   // ── Weather + real sunrise/sunset day/night cycle ────────────────
-  const weather = useWeatherContext();
+  const weather = useWeatherContext(visible);
 
   const dayNightSV = useSharedValue(
     (() => { const p = weather.dayNightProgress; return 1 - p; })()

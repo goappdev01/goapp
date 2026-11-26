@@ -25,6 +25,7 @@ import { useActionCompletion } from "@/hooks/useActionCompletion";
 import { LandingActionCompletion, type CompletionFrame } from "@/components/landing/LandingActionCompletion";
 import { LocalTransportPanel } from "@/components/LocalTransportPanel";
 import type { LocalTransportKind } from "@/data/localTransport";
+import { readDeviceLocation, offerLocationSettings } from "@/lib/deviceLocation";
 import { completionKey, ownedCompletionEntry, completionEligible, completionHideEligible, completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
 import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, type NoteReminderDraft } from "@/lib/goNoteTools";
 import { saveGoNoteReminder, changeGoNoteReminder, confirmAttachedGoNoteReminder } from "@/lib/goNoteReminder";
@@ -4503,7 +4504,7 @@ function HomeScreenContent() {
     setCalBgViewMonth(iso.slice(0, 7));
     setCalScrollToDateTarget({ dateISO: iso, timeHHMM: "", token: Date.now() });
   };
-  const calWeather = useWeatherContext();
+  const calWeather = useWeatherContext(calOpen);
   // monthGridYear/Month, clockOpen/Phase/H12/Mins/Period/clockLastHapticVal
   // viven ahora dentro del hook calFlow — se sincronizan a estado local
   // mediante efectos más abajo para que el renderizado existente no cambie.
@@ -11415,21 +11416,6 @@ function HomeScreenContent() {
     }
   };
 
-  // Persistencia de la última ubicación conocida para resolver "aquí"
-  // sin fricción: si ya tenemos coords + dirección guardadas y el permiso
-  // sigue concedido, evitamos cualquier popup y resolvemos al instante.
-  const persistLastLocation = async (
-    c: { lat: number; lng: number },
-    text: string,
-  ) => {
-    try {
-      await AsyncStorage.setItem(
-        "go_last_location_v1",
-        JSON.stringify({ coords: c, place: text, savedAt: Date.now() }),
-      );
-    } catch {}
-  };
-
   // Reverse geocoding tolerante a fallos: si la API no responde, devolvemos
   // las coordenadas en formato legible para no bloquear el flujo.
   const reverseGeocodeSafe = async (c: {
@@ -11454,39 +11440,14 @@ function HomeScreenContent() {
   // (last-known) antes de pedir un fix nuevo.
   const useGpsSilent = async (): Promise<boolean> => {
     try {
-      const perms = await Location.getForegroundPermissionsAsync();
-      let status = perms.status;
-      if (status !== "granted") {
-        if (!perms.canAskAgain) return false;
-        const req = await Location.requestForegroundPermissionsAsync();
-        status = req.status;
-        if (status !== "granted") return false;
-      }
-      // 1) Last-known: instantáneo, sin red.
-      try {
-        const last = await Location.getLastKnownPositionAsync({
-          maxAge: 1000 * 60 * 30,
-        });
-        if (last?.coords) {
-          const c = { lat: last.coords.latitude, lng: last.coords.longitude };
-          setCoords(c);
-          const text = await reverseGeocodeSafe(c);
-          setPlace(text);
-          persistLastLocation(c, text);
-          return true;
-        }
-      } catch {}
-      // 2) Fix nuevo (más lento). Sigue siendo silencioso.
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      const pos = await readDeviceLocation(Location, { accuracy: Location.Accuracy.Balanced, lastKnownMaxAgeMs: 1000 * 60 * 30 });
       const c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       setCoords(c);
       const text = await reverseGeocodeSafe(c);
       setPlace(text);
-      persistLastLocation(c, text);
       return true;
-    } catch {
+    } catch (error) {
+      offerLocationSettings(error, lang);
       return false;
     }
   };
@@ -11501,46 +11462,15 @@ function HomeScreenContent() {
         duration: 700,
         useNativeDriver: true,
       }).start();
-      // Comprueba permisos antes de pedir nada: si ya están concedidos,
-      // NUNCA mostramos popup; resolvemos directamente.
-      const perms = await Location.getForegroundPermissionsAsync();
-      let status = perms.status;
-      if (status !== "granted") {
-        if (!perms.canAskAgain) {
-          showToast(t('toast_location_denied'));
-          return;
-        }
-        const req = await Location.requestForegroundPermissionsAsync();
-        status = req.status;
-        if (status !== "granted") {
-          showToast(t('toast_location_denied'));
-          return;
-        }
-      }
-      // Last-known primero (instantáneo). Si no hay, fix nuevo.
-      let c: { lat: number; lng: number } | null = null;
-      try {
-        const last = await Location.getLastKnownPositionAsync({
-          maxAge: 1000 * 60 * 30,
-        });
-        if (last?.coords) {
-          c = { lat: last.coords.latitude, lng: last.coords.longitude };
-        }
-      } catch {}
-      if (!c) {
-        const pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      }
+      const pos = await readDeviceLocation(Location, { accuracy: Location.Accuracy.Balanced, lastKnownMaxAgeMs: 1000 * 60 * 30 });
+      const c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       setCoords(c);
       const text = await reverseGeocodeSafe(c);
       setPlace(text);
-      persistLastLocation(c, text);
       showToast(t('toast_location_set'), "success");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch {
-      showToast(t('toast_location_error'), "error");
+    } catch (error) {
+      if (!offerLocationSettings(error, lang)) showToast(error instanceof Error ? error.message : t('toast_location_error'), "error");
     } finally {
       setLocating(false);
     }
@@ -12950,12 +12880,8 @@ function HomeScreenContent() {
           }
         }
       } catch {}
-      // go_last_location_v1 se mantiene en AsyncStorage solo para
-      // persistencia entre sesiones, pero NO se vuelca en el estado del
-      // formulario al arrancar: hacerlo pintaría la barra de ubicación en
-      // color GO aunque el usuario no haya seleccionado nada aún (estado
-      // "fantasma"). useGps ya tiene su propio getLastKnownPositionAsync
-      // del dispositivo como caché rápida, así que no hay pérdida funcional.
+      // Do not restore a device location into the form or persist another copy.
+      // The native location cache is read on demand after checking authorization.
       try {
         const raw = await AsyncStorage.getItem("go_internal_notes_v1");
         if (raw) {
@@ -13649,37 +13575,9 @@ function HomeScreenContent() {
           setAquiSendingId(g.id);
           let coords: { lat: number; lng: number } | null = null;
           try {
-            const perms = await Location.getForegroundPermissionsAsync();
-            let status = perms.status;
-            if (status !== "granted" && perms.canAskAgain) {
-              const req = await Location.requestForegroundPermissionsAsync();
-              status = req.status;
-            }
-            if (status === "granted") {
-              try {
-                const last = await Location.getLastKnownPositionAsync({
-                  maxAge: 1000 * 60 * 5,
-                });
-                if (last?.coords) {
-                  coords = {
-                    lat: last.coords.latitude,
-                    lng: last.coords.longitude,
-                  };
-                }
-              } catch {}
-              if (!coords) {
-                try {
-                  const pos = await Location.getCurrentPositionAsync({
-                    accuracy: Location.Accuracy.Balanced,
-                  });
-                  coords = {
-                    lat: pos.coords.latitude,
-                    lng: pos.coords.longitude,
-                  };
-                } catch {}
-              }
-            }
-          } catch {}
+            const pos = await readDeviceLocation(Location, { accuracy: Location.Accuracy.Balanced, lastKnownMaxAgeMs: 1000 * 60 * 5 });
+            coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          } catch (error) { if (offerLocationSettings(error, lang)) { setAquiSendingId(null); return; } }
           const dest = normalizePhoneForWhatsApp(g.phone);
           let txt: string;
           const safeLabel = (g.intentLabel ?? "GO").toUpperCase();

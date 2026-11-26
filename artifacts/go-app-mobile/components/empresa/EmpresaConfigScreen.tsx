@@ -37,6 +37,8 @@ import {
   View,
 } from "react-native";
 import * as Location from "expo-location";
+import { readDeviceLocation, offerLocationSettings } from "@/lib/deviceLocation";
+import type { ForegroundLocationAdapter } from "@/lib/locationAccess";
 import * as Linking from "expo-linking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { COUNTRY_CONFIGS, MARKET_STORAGE_KEY, type Market } from "@/utils/countryConfig";
@@ -164,13 +166,14 @@ export function businessPhoneError(value: string, country: BusinessPhoneCountry,
 }
 
 type BusinessCoordinates = { latitude: number; longitude: number };
-type DeviceLocationAdapter = Pick<typeof Location, "requestForegroundPermissionsAsync" | "getCurrentPositionAsync" | "reverseGeocodeAsync" | "Accuracy">;
+type DeviceLocationAdapter = ForegroundLocationAdapter & Pick<typeof Location, "reverseGeocodeAsync">;
 export async function readBusinessDeviceLocation(adapter: DeviceLocationAdapter, options: {
   allowAddressLookup: boolean;
   onCoordinates: (coordinates: BusinessCoordinates) => void | Promise<void>;
 }): Promise<{ status: "denied" } | { status: "coordinates" | "address"; coordinates: BusinessCoordinates; address?: string }> {
-  if ((await adapter.requestForegroundPermissionsAsync()).status !== "granted") return { status: "denied" };
-  const position = await adapter.getCurrentPositionAsync({ accuracy: adapter.Accuracy.Balanced });
+  let position;
+  try { position = await readDeviceLocation(adapter, { accuracy: adapter.Accuracy.Balanced }); }
+  catch (error) { if ((error as {code?:string}).code === "permission-denied") return { status: "denied" }; throw error; }
   const coordinates = { latitude: position.coords.latitude, longitude: position.coords.longitude };
   if (!Number.isFinite(coordinates.latitude) || !Number.isFinite(coordinates.longitude)
     || Math.abs(coordinates.latitude) > 90 || Math.abs(coordinates.longitude) > 180) throw new Error("Invalid device coordinates");
@@ -954,8 +957,9 @@ function StepUbicacion({ onFocusField }: { onFocusField?: (input: TextInputInsta
           lang === "en" ? "Address lookup is unavailable here. Enter the address manually; the coordinates remain saved."
             : "No se ha encontrado una dirección precisa. Introduce o confirma la dirección manualmente; las coordenadas quedan guardadas.");
       }
-    } catch {
+    } catch (error) {
       if (!stepMounted.current) return;
+      if (offerLocationSettings(error, lang)) return;
       Alert.alert(lang === "en" ? "Location unavailable" : "Ubicación no disponible",
         lang === "en" ? "Could not obtain or save the device location. Enter the address manually."
           : "No se pudo obtener o guardar la ubicación del dispositivo. Introduce la dirección manualmente.");

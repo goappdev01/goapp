@@ -5,6 +5,7 @@ import { Feather } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
+import { readDeviceLocation, ensureDeviceLocationPermission, offerLocationSettings } from "@/lib/deviceLocation";
 import { LinearGradient } from "expo-linear-gradient";
 import { GoToolPanel, GoToolRailToggle } from "@/components/ui/GoToolRail";
 import { GoScreenModal } from "@/components/ui/GoScreenModal";
@@ -171,7 +172,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
     if(result.afterClose)result.afterClose();else onSaved?.(result.entry,result.notice);
   };
   useEffect(()=>()=>{savedExit.current=null;},[]);
-  const work=async(kind:"attachments"|"location",fn:()=>Promise<void>)=>{if(workLock.current||saveLock.current||toolCloseLock.current)return;const trace=startNoteSaveTrace("selection:"+kind);workLock.current=true;setAttachmentBusy(true);setError("");try{await fn();}catch(e){if(latest.current.visible)setError(e instanceof Error?e.message:"No se ha podido completar la selección.");}finally{trace.mark("selectionFinished");workLock.current=false;setAttachmentBusy(false);}};
+  const work=async(kind:"attachments"|"location",fn:()=>Promise<void>)=>{if(workLock.current||saveLock.current||toolCloseLock.current)return;const trace=startNoteSaveTrace("selection:"+kind);workLock.current=true;setAttachmentBusy(true);setError("");try{await fn();}catch(e){if(latest.current.visible){offerLocationSettings(e);setError(e instanceof Error?e.message:"No se ha podido completar la selección.");}}finally{trace.mark("selectionFinished");workLock.current=false;setAttachmentBusy(false);}};
   const attach=async(kind:"file"|"image")=>work("attachments",async()=>{
     const expected=latest.current.scope,expectedId=draftRef.current.id;if(!expected || !latest.current.ready)throw new Error("Espera a que se verifique tu cuenta para adjuntar archivos.");
     if(!await hideKeyboard())return;
@@ -187,8 +188,9 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   const locate=async(search:boolean)=>work("location",async()=>{
     const expected=latest.current.scope,expectedId=draftRef.current.id,place=(toolDraftRef.current||draftRef.current).place;
     if(!expected||!latest.current.ready)throw new Error("Espera a que se verifique tu cuenta para seleccionar la ubicación.");
-    if(!search||Platform.OS==="android"){const permission=await Location.requestForegroundPermissionsAsync();if(permission.status!=="granted")throw new Error("Permite el acceso a ubicación o escribe la dirección manualmente.");}
-    const coordinates=search?await Location.geocodeAsync(place):[(await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.Balanced})).coords];
+    const isActive=()=>latest.current.visible&&latest.current.id===expectedId&&latest.current.scope?.userId===expected.userId&&latest.current.scope?.context===expected.context;
+    if(search&&Platform.OS==="android")await ensureDeviceLocationPermission(Location,{isActive});
+    const coordinates=search?await Location.geocodeAsync(place):[(await readDeviceLocation(Location,{accuracy:Location.Accuracy.Balanced,isActive})).coords];
     if(!coordinates.length)throw new Error("No se ha encontrado esa ubicación. Puedes conservar la dirección escrita.");
     const results=[];for(const point of coordinates.slice(0,5)){if(!Number.isFinite(point.latitude)||!Number.isFinite(point.longitude)||Math.abs(point.latitude)>90||Math.abs(point.longitude)>180)throw new Error("No se ha obtenido una ubicación válida.");const address=(await Location.reverseGeocodeAsync(point))[0];results.push({latitude:point.latitude,longitude:point.longitude,label:[address?.street,address?.streetNumber,address?.city].filter(Boolean).join(", ")||`${point.latitude}, ${point.longitude}`});}
     if(latest.current.visible&&latest.current.id===expectedId&&latest.current.scope?.userId===expected.userId&&latest.current.scope?.context===expected.context){

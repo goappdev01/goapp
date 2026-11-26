@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import * as Location from "expo-location";
+import { readDeviceLocation, offerLocationSettings } from "@/lib/deviceLocation";
 import { GoToolAction, GoToolRailToggle } from "@/components/ui/GoToolRail";
 import { ContactPlacesPanel, openPlace } from "./contactos/ContactPlacesPanel";
 import { coordinateLabel, normalizePlace, type PlaceDraft } from "@/data/contactPlaces";
@@ -25,16 +26,11 @@ export function MessageLocationTools({ handedness, bounds, incoming, onIncomingH
     const token=++revision.current;
     setOpen(true);setTool("capture");setPreview(undefined);setManual("");setNotice("");setBusy(true);
     try{
-      let permission=await Location.getForegroundPermissionsAsync();
-      if(token!==revision.current||!active.current)return;
-      if(permission.status!=="granted"&&permission.canAskAgain)permission=await Location.requestForegroundPermissionsAsync();
-      if(token!==revision.current||!active.current)return;
-      if(permission.status!=="granted"){setNotice("Ubicación no autorizada. Puedes indicar una dirección manualmente.");return;}
-      const point=await Location.getCurrentPositionAsync({accuracy:Location.Accuracy.Balanced});
+      const point=await readDeviceLocation(Location,{accuracy:Location.Accuracy.Balanced,isActive:()=>token===revision.current&&active.current});
       if(token!==revision.current||!active.current)return;
       const coordinates={latitude:Number(point.coords.latitude.toFixed(5)),longitude:Number(point.coords.longitude.toFixed(5))};
       setPreview(normalizePlace({title:"Estoy aquí",source:"current",coordinates,approximate:point.coords.accuracy==null||point.coords.accuracy>100}));
-    }catch{if(token===revision.current&&active.current)setNotice("No se pudo obtener tu posición. Puedes indicar una dirección.");}
+    }catch(error){if(token===revision.current&&active.current){offerLocationSettings(error);setNotice(error instanceof Error?error.message:"No se pudo obtener tu posición. Puedes indicar una dirección.");}}
     finally{if(token===revision.current&&active.current)setBusy(false);}
   };
   const choose=(next:Tool)=>{revision.current++;setBusy(false);setPreview(undefined);setNotice("");setTool(next);};

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { KeyboardAvoidingView, Linking, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import * as Location from "expo-location";
+import { offerLocationSettings } from "@/lib/deviceLocation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GoScreenModal } from "@/components/ui/GoScreenModal";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
@@ -34,7 +35,10 @@ export function LocalTransportPanel({ kind, onClose, scopeKey, lang = "es", hand
       if (!valid(token, owner)) return;
       if (locality) { setCity(locality.city); setCountry(locality.country); setNotice(label("Comprueba la localidad antes de abrir el servicio.", "Check the locality before opening the service.")); }
       else setNotice(label("Ubicación no disponible o no autorizada. Escribe la localidad y el país.", "Location unavailable or not authorized. Enter the locality and country."));
-    } catch { if (valid(token, owner)) setNotice(label("No se pudo obtener la localidad. Puedes escribirla manualmente.", "Could not obtain the locality. You can enter it manually.")); }
+    } catch (error) { if (valid(token, owner)) {
+      offerLocationSettings(error, lang);
+      setNotice(error instanceof Error ? error.message : label("No se pudo obtener la localidad. Puedes escribirla manualmente.", "Could not obtain the locality. You can enter it manually."));
+    } }
     finally { if (valid(token, owner)) { locked.current = false; setBusy(false); } }
   };
   const locality = transportLocality(city, country);
@@ -64,8 +68,8 @@ export function LocalTransportPanel({ kind, onClose, scopeKey, lang = "es", hand
           <Text style={text}>{label("Indica solo localidad y país, sin dirección personal.", "Enter only locality and country, without a personal address.")}</Text>
           <TextInput accessibilityLabel={label("Localidad", "Locality")} placeholder={label("Localidad", "Locality")} value={city} onChangeText={value => edit(value, "city")} maxLength={80} placeholderTextColor="#94a3b8" style={{ ...text, minHeight: 48, padding: 12, borderWidth: 1, borderColor: "#64748b", borderRadius: 12 }} />
           <TextInput accessibilityLabel={label("País", "Country")} placeholder={label("País", "Country")} value={country} onChangeText={value => edit(value, "country")} maxLength={80} placeholderTextColor="#94a3b8" style={{ ...text, minHeight: 48, padding: 12, borderWidth: 1, borderColor: "#64748b", borderRadius: 12 }} />
-          <Text style={{ ...text, fontSize: 13 }}>{label("Opcional: al usar ubicación, autorizas enviar una posición aproximada al geocodificador del sistema para obtener la localidad. Solo funciona con el permiso de ubicación ya concedido. No se envían coordenadas al operador ni al buscador.", "Optional: using location authorizes sending an approximate position to the system geocoder to obtain the locality. Requires location permission already granted. No coordinates are sent to the operator or search engine.")}</Text>
-          {action(label("Usar ubicación autorizada", "Use authorized location"), () => void locate(), busy)}
+          <Text style={{ ...text, fontSize: 13 }}>{label("Al usar ubicación, autorizas enviar una posición aproximada al geocodificador del sistema solo para obtener localidad y país. No se envían coordenadas al operador ni al buscador.", "Using location authorizes sending an approximate position to the system geocoder only to obtain locality and country. No coordinates are sent to the operator or search engine.")}</Text>
+          {action(label("Usar mi ubicación", "Use my location"), () => void locate(), busy)}
           {!!target && <>
             <Text style={text}>{target.name}</Text>
             <Text style={{ ...text, fontSize: 13 }}>{target.official

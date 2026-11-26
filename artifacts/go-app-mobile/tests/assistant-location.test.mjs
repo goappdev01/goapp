@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const ts = require("typescript");
 function load(file, modules, globals = {}) {
   const context = { exports: {}, console, Date, Error, setTimeout, clearTimeout, ...globals,
-    require(name) { if (name in modules) return modules[name];if(name==="@/components/ui/GoNavigationFloating")return {GoNavigationFloating:"GoNavigationFloating"};if(name==="expo-linear-gradient")return {LinearGradient:"LinearGradient"};if(name==="@/components/ui/GoCloseButton")return {GoCloseButton:"GoCloseButton"};if(name==="@/components/landing/SupportVoiceNotice")return {SupportVoiceNotice:"SupportVoiceNotice"}; if(name==="@/theme/goAssistantColors")return load("theme/goAssistantColors.ts",{}); if(name === '@/components/ui/GoScreenCloseSurface') return {GoScreenCloseSurface:'GestureHandlerRootView',GoScreenCloseGuide:'Guide'}; if(name === '@/components/ui/GoScreenModal') return {GoScreenModal: modules['react-native'].Modal}; throw Error("Unexpected " + name); } };
+    require(name) { if(name==='@/lib/deviceLocation')return require('./helpers/device-location.cjs')(); if (name in modules) return modules[name];if(name==="@/components/ui/GoNavigationFloating")return {GoNavigationFloating:"GoNavigationFloating"};if(name==="expo-linear-gradient")return {LinearGradient:"LinearGradient"};if(name==="@/components/ui/GoCloseButton")return {GoCloseButton:"GoCloseButton"};if(name==="@/components/landing/SupportVoiceNotice")return {SupportVoiceNotice:"SupportVoiceNotice"}; if(name==="@/theme/goAssistantColors")return load("theme/goAssistantColors.ts",{}); if(name === '@/components/ui/GoScreenCloseSurface') return {GoScreenCloseSurface:'GestureHandlerRootView',GoScreenCloseGuide:'Guide'}; if(name === '@/components/ui/GoScreenModal') return {GoScreenModal: modules['react-native'].Modal}; throw Error("Unexpected " + name); } };
   if (file === "lib/bookingAssistant.ts") modules["./authSession"] = loadAuthSession(context, modules["@react-native-async-storage/async-storage"].default);
   vm.runInNewContext(ts.transpileModule(readFileSync(file, "utf8"), {
     compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React }
@@ -85,7 +85,7 @@ test("explicit remember persists the selected radius independently of applying t
   assert.equal(f.render().zone.radiusKm, 3.5); assert.equal(f.render().request.placeQuery, cieza.label);
 });
 function gpsFixture(overrides = {}) { return fixture(undefined, {
-  getForegroundPermissionsAsync: async () => ({ granted: true }),
+  Accuracy:{Lowest:1,Balanced:3},hasServicesEnabledAsync:async()=>true,getForegroundPermissionsAsync: async () => ({ granted: true,status:"granted" }),
   getLastKnownPositionAsync: async () => ({ coords: cieza }),
   reverseGeocodeAsync: async () => [{ city: "Cieza", postalCode: "30530", country: "España" }],
   ...overrides,
@@ -98,11 +98,11 @@ test("GPS updates visible selection, preserves GPS origin and resolves a real ad
   assert.equal(f.render().zone.source, "gps");
 });
 test("GPS denial, invalid coordinates and reverse failure never invent an address", async () => {
-  const denied = gpsFixture({ getForegroundPermissionsAsync: async () => ({ granted: false }),
-    requestForegroundPermissionsAsync: async () => ({ granted: false }) });
+  const denied = gpsFixture({ getForegroundPermissionsAsync: async () => ({ granted: false,status:"denied",canAskAgain:true }),
+    requestForegroundPermissionsAsync: async () => ({ granted: false,status:"denied",canAskAgain:true }) });
   assert.equal(await denied.render().gpsZone(true), null);
   const invalid = gpsFixture({ getLastKnownPositionAsync: async () => ({ coords: { latitude: 999, longitude: 1 } }) });
-  await assert.rejects(invalid.render().gpsZone(true), /coordenadas válidas/);
+  await assert.rejects(invalid.render().gpsZone(true), /ubicación|coordenadas válidas/);
   const reverse = gpsFixture({ reverseGeocodeAsync: async () => { throw Error("offline"); } });
   const gps = await reverse.render().gpsZone(true); assert.match(gps.label, /^GPS: 38/);
   reverse.render().pickPlace(gps, "gps"); assert.match(reverse.render().placeNotice, /No se pudo resolver/);

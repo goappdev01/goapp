@@ -5,7 +5,8 @@ import vm from 'node:vm';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { React, createRoot, document, evaluate, rn, native, ts } = require('./helpers/react-lifecycle.cjs');
-const transport = evaluate('data/localTransport.ts');
+const locationAccess = require('./helpers/device-location.cjs')();
+const transport = evaluate('data/localTransport.ts', { '@/lib/deviceLocation': locationAccess });
 const plain = value => JSON.parse(JSON.stringify(value));
 const at = (city, country = 'España') => ({ city, country });
 
@@ -60,23 +61,33 @@ test('external navigation uses the supplied existing opener, propagates failures
 function gps(overrides = {}) {
   const calls = [];
   const adapter = { Accuracy: { Lowest: 1 },
+    hasServicesEnabledAsync: async () => true,
+    requestForegroundPermissionsAsync: async () => { calls.push('request'); return { status: 'denied', canAskAgain: false }; },
     getForegroundPermissionsAsync: async () => { calls.push('permission'); return { status: 'granted' }; },
     getCurrentPositionAsync: async options => { calls.push(['position', options]); return { coords: { latitude: 38.05432, longitude: -1.23456 } }; },
     reverseGeocodeAsync: async point => { calls.push(['geocode', point]); return [{ city: 'Molina de Segura', isoCountryCode: 'ES', street: 'Never forward', streetNumber: '79' }]; }, ...overrides };
   return { calls, adapter };
 }
-test('location needs explicit geocoder consent AND an existing permission; denied permission leaves manual entry available', async () => {
+test('location retains explicit geocoder consent separately from native permission; denied permission leaves manual entry available', async () => {
   const f = gps();
   await assert.rejects(transport.locateTransportLocality(f.adapter, false), /CONSENT_REQUIRED/);
   assert.equal(f.calls.length, 0);
-  const denied = gps({ getForegroundPermissionsAsync: async () => ({ status: 'denied' }) });
-  assert.equal(await transport.locateTransportLocality(denied.adapter, true), null);
+  const denied = gps({ getForegroundPermissionsAsync: async () => ({ status: 'denied', canAskAgain: false }) });
+  await assert.rejects(transport.locateTransportLocality(denied.adapter, true), error => error.code === 'permission-blocked');
   assert.equal(denied.calls.length, 0, 'no position, geocoding, new permission request or external service');
+});
+test('Taxi and public transport can now obtain their first native grant on explicit use', async () => {
+  let permission = { status: 'undetermined', canAskAgain: true };
+  const f = gps({ getForegroundPermissionsAsync: async () => permission,
+    requestForegroundPermissionsAsync: async () => { f.calls.push('request'); return permission = { status: 'granted', canAskAgain: true }; } });
+  assert.equal((await transport.locateTransportLocality(f.adapter, true)).city, 'Molina de Segura');
+  await transport.locateTransportLocality(f.adapter, true);
+  assert.equal(f.calls.filter(call => call === 'request').length, 1);
 });
 test('a fresh coarse position resolves only city/country, never retaining or handing coordinates to a provider', async () => {
   const f = gps(), result = await transport.locateTransportLocality(f.adapter, true);
   assert.deepEqual(plain(result), { city: 'Molina de Segura', country: 'ES' });
-  assert.deepEqual(plain(f.calls[2]), ['geocode', { latitude: 38.05, longitude: -1.23 }]);
+  assert.deepEqual(plain(f.calls.find(call => Array.isArray(call) && call[0] === 'geocode')), ['geocode', { latitude: 38.05, longitude: -1.23 }]);
   assert.doesNotMatch(JSON.stringify(result), /street|latitude|longitude|38\./);
   f.adapter.reverseGeocodeAsync = async () => [{ city: 'Madrid', isoCountryCode: 'ES' }];
   const moved = await transport.locateTransportLocality(f.adapter, true);
@@ -84,8 +95,8 @@ test('a fresh coarse position resolves only city/country, never retaining or han
   assert.equal(f.calls.filter(c => Array.isArray(c) && c[0] === 'position').length, 2);
 });
 test('missing city, invalid position or geocoder failure never invent a locality', async () => {
+  await assert.rejects(transport.locateTransportLocality(gps({ getCurrentPositionAsync: async () => ({ coords: { latitude: NaN, longitude: 1 } }) }).adapter, true), error => error.code === 'unavailable');
   for (const overrides of [
-    { getCurrentPositionAsync: async () => ({ coords: { latitude: NaN, longitude: 1 } }) },
     { reverseGeocodeAsync: async () => [] },
     { reverseGeocodeAsync: async () => [{ street: 'Unknown street', country: 'España' }] },
   ]) assert.equal(await transport.locateTransportLocality(gps(overrides).adapter, true), null);
@@ -99,6 +110,7 @@ function uiFixture({ openURL = async () => {}, location = gps().adapter } = {}) 
     TextInput: props => { fields.set(props.accessibilityLabel, props); return React.createElement('input'); },
     TouchableOpacity: props => { buttons.set(props.accessibilityLabel, props); return React.createElement('button', null, props.children); } };
   const { LocalTransportPanel } = evaluate('components/LocalTransportPanel.tsx', { 'react-native': nativeProps,
+    '@/lib/deviceLocation': locationAccess,
     'expo-location': location, '@/data/localTransport': transport,
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 47, bottom: 34, left: 0, right: 0 }) },
     '@/components/ui/GoCloseButton': { GoCloseButton: () => null } });
@@ -129,13 +141,13 @@ test('both actual access panels support manual locality, locality changes, faile
 });
 test('denied GPS has a clear manual fallback, and a late GPS response cannot cross accounts', async () => {
   const denied = uiFixture({ location: gps({ getForegroundPermissionsAsync: async () => ({ status: 'denied' }) }).adapter });
-  try { await denied.render(); await denied.press('Usar ubicación autorizada'); assert.match(denied.text(), /no autorizada/); assert.equal(denied.fields.get('Localidad').value, ''); }
+  try { await denied.render(); await denied.press('Usar mi ubicación'); assert.match(denied.text(), /no autorizada|manualmente/); assert.equal(denied.fields.get('Localidad').value, ''); }
   finally { await denied.close(); }
   let resolve; const pending = new Promise(done => resolve = done);
   const lateGps = gps({ getCurrentPositionAsync: () => pending });
   const f = uiFixture({ location: lateGps.adapter });
   try {
-    await f.render(); await f.press('Usar ubicación autorizada');
+    await f.render(); await f.press('Usar mi ubicación');
     f.props.scopeKey = 'two:BUSINESS'; await f.render();
     await React.act(async () => { resolve({ coords: { latitude: 38, longitude: -1 } }); await Promise.resolve(); });
     assert.equal(f.fields.get('Localidad').value, ''); assert.equal(f.fields.get('País').value, '');

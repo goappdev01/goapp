@@ -18,6 +18,7 @@ import { PlanoEmpresaScreen } from "./PlanoEmpresaScreen";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
+import { readDeviceLocation, offerLocationSettings } from "@/lib/deviceLocation";
 import { hapticToggle } from "@/utils/goHaptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useVerification } from "@/hooks/useVerification";
@@ -947,13 +948,7 @@ export function GoBookingScreen({
   const useCurrentLocation = async () => {
     setLocLoading(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permisos necesarios", "Activa el acceso a la ubicación para usar esta función.");
-        setLocLoading(false);
-        return;
-      }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const pos = await readDeviceLocation(Location, { accuracy: Location.Accuracy.Balanced });
       const [place] = await Location.reverseGeocodeAsync({
         latitude: pos.coords.latitude,
         longitude: pos.coords.longitude,
@@ -966,8 +961,8 @@ export function GoBookingScreen({
         if (b) await saveBusiness({ ...b, location: address });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
-    } catch {
-      Alert.alert("Error", "No se pudo obtener la ubicación. Inténtalo de nuevo.");
+    } catch (error) {
+      if (!offerLocationSettings(error)) Alert.alert("Ubicación", error instanceof Error ? error.message : "No se pudo obtener la ubicación. Puedes escribir la dirección manualmente.");
     }
     setLocLoading(false);
   };
