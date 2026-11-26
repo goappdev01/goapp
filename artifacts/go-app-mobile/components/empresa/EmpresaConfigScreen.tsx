@@ -37,6 +37,7 @@ import {
   View,
 } from "react-native";
 import * as Location from "expo-location";
+import * as Linking from "expo-linking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { COUNTRY_CONFIGS, MARKET_STORAGE_KEY, type Market } from "@/utils/countryConfig";
 import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
@@ -92,6 +93,9 @@ import { ServiceAssociatedProducts, useServiceComplementCatalog } from "./Servic
 import { CatalogPhotoButton } from "./CatalogPhotoButton";
 import { isSharedCatalogPhotoReference } from "@/data/demoCatalogPhotos";
 import { isCatalogStorageReference } from "@/data/booking";
+import { useCommercialBusinessLink } from "@/data/commercialQr";
+import { assignPhysicalQr, getCommercialSupplierUrl, previewPhysicalQr, shareCommercialPoster, type PhysicalQrPreview } from "@/data/commercialQr";
+import { isCloudId } from "@/data/booking";
 import { isStableBookingId, serializeServiceConfiguration, validateBookingResources,
   validateBusinessTimezone, validateServiceTiming, type BookingResource } from "@/data/serviceTiming";
 import { readServiceWorkWait, serviceWorkWaitTotal, updateServiceWorkWait, type ServiceWorkWaitDraft } from "@/data/serviceWorkWait";
@@ -200,8 +204,6 @@ const GREEN  = "#3D9A84";
 const GOLD   = "#C4883A";
 const PURPLE = "#7C69BE";
 const RED    = "#EF4444";
-
-const MOCK_LINK  = "https://go.teso.app/b/mi-negocio";
 
 // ─── Step definitions ─────────────────────────────────────────────────────────
 
@@ -2983,25 +2985,87 @@ function StepPublicar({
   const { config, demo } = useBusinessConfig();
   const { t, lang } = useLanguage();
   const [copied, setCopied] = useState(false);
+  const commercialQr = useCommercialBusinessLink(config.businessId, !!demo);
+  const [physicalReference, setPhysicalReference] = useState("");
+  const [physicalPreview, setPhysicalPreview] = useState<PhysicalQrPreview | null>(null);
+  const [physicalBusy, setPhysicalBusy] = useState(false);
+  const [supplierUrl, setSupplierUrl] = useState<string | null>(null);
+  const physicalBusinessRef = useRef(config.businessId);
+  const physicalCodeRef = useRef(physicalReference);
+  physicalBusinessRef.current = config.businessId;
+  physicalCodeRef.current = physicalReference;
+  useEffect(() => { setPhysicalReference(""); setPhysicalPreview(null); }, [config.businessId]);
+  useEffect(() => {
+    if (demo || !commercialQr.url) { setSupplierUrl(null); return; }
+    let current = true;
+    void getCommercialSupplierUrl().then(url => { if (current) setSupplierUrl(url); });
+    return () => { current = false; };
+  }, [demo, commercialQr.url]);
+
+  const previewPhysical = async () => {
+    if (!config.businessId || !isCloudId(config.businessId) || physicalBusy) return;
+    setPhysicalBusy(true); setPhysicalPreview(null);
+    try {
+      const who = await captureAuthIdentity();
+      if (!who) throw Error("auth");
+      const preview = await previewPhysicalQr(config.businessId, physicalReference.trim(), who.userId);
+      if (!await isAuthIdentityCurrent(who)) throw Error("auth");
+      if (physicalBusinessRef.current !== config.businessId || physicalCodeRef.current !== physicalReference) return;
+      setPhysicalPreview(preview);
+    } catch { Alert.alert(lang === "en" ? "Physical QR" : "QR físico", lang === "en" ? "The code could not be checked." : "No se ha podido comprobar el código."); }
+    finally { setPhysicalBusy(false); }
+  };
+  const confirmPhysical = () => {
+    if (!config.businessId || !physicalPreview?.canAssign || physicalBusy) return;
+    const targetBusinessId = config.businessId;
+    const targetReference = physicalReference.trim();
+    Alert.alert(lang === "en" ? "Assign physical QR" : "Asignar QR físico", `${physicalPreview.inventoryId} · ${config.businessName}`, [
+      { text: lang === "en" ? "Cancel" : "Cancelar", style: "cancel" },
+      { text: lang === "en" ? "Assign" : "Asignar", onPress: () => { void (async () => {
+        if (physicalBusinessRef.current !== targetBusinessId || physicalCodeRef.current.trim() !== targetReference) return;
+        setPhysicalBusy(true);
+        try {
+          const who = await captureAuthIdentity();
+          if (!who) throw Error("auth");
+          await assignPhysicalQr(targetBusinessId, targetReference, who.userId);
+          if (!await isAuthIdentityCurrent(who)) throw Error("auth");
+          setPhysicalPreview({ ...physicalPreview, state: "assigned", canAssign: false, assignedHere: true });
+        } catch { Alert.alert(lang === "en" ? "Physical QR" : "QR físico", lang === "en" ? "Assignment was not confirmed." : "No se ha confirmado la asignación."); }
+        finally { setPhysicalBusy(false); }
+      })(); } },
+    ]);
+  };
 
   const currentSector = SECTORS.find(s => s.id === config.sectorId);
   const currentSub    = currentSector?.subs.find(s => s.id === config.subId);
 
   const handleShare = async () => {
     if (demo) { blockDemoExternal(lang); return; }
+    if (!commercialQr.url) return;
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await Share.share({ message: `Reserva en mi negocio a través de GO:\n${MOCK_LINK}`, url: MOCK_LINK, title: "Reservar en GO" });
+      await Share.share({ message: `Reserva en mi negocio a través de GO:\n${commercialQr.url}`, url: commercialQr.url, title: "Reservar en GO" });
     } catch {}
   };
   const handleCopy = async () => {
     if (demo) { blockDemoExternal(lang); return; }
+    if (!commercialQr.url) return;
     try {
-      await Clipboard.setStringAsync(MOCK_LINK);
+      await Clipboard.setStringAsync(commercialQr.url);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     } catch {}
+  };
+  const handlePoster = async () => {
+    if (!commercialQr.url || !config.businessId) return;
+    try {
+      const who = await captureAuthIdentity();
+      if (!who) throw Error("auth");
+      await shareCommercialPoster("business", config.businessId, who.userId);
+    } catch {
+      Alert.alert(lang === "en" ? "Poster unavailable" : "Cartel no disponible", lang === "en" ? "The A6 poster could not be shared." : "No se ha podido compartir el cartel A6.");
+    }
   };
 
   // step: número del paso al que navega al pulsar (-1 = actividad, null = no navega)
@@ -3129,27 +3193,56 @@ function StepPublicar({
 
       {/* QR GO */}
       <View style={[c.sectionCard, { alignItems: "center", paddingVertical: 24 }]}>
-        <View style={c.qrWrapper}>
-          <QRCode value={demo ? `GO DEMO local · ${config.businessName || "Mi negocio"}` : MOCK_LINK} size={150} backgroundColor="#FFFFFF" color="#111827" />
-        </View>
-        <Text style={c.qrLink}>{demo ? (lang === "en" ? "No public booking link" : "Sin enlace público de reservas") : MOCK_LINK}</Text>
+        {commercialQr.url ? <View style={c.qrWrapper}>
+          <QRCode value={commercialQr.url} size={150} backgroundColor="#FFFFFF" color="#111827" />
+        </View> : null}
+        <Text style={c.qrLink}>{commercialQr.url ?? (lang === "en" ? "Public booking link unavailable" : "Enlace público de reservas no disponible")}</Text>
       </View>
 
-      <TouchableOpacity activeOpacity={0.85} onPress={handleShare} style={[c.bigBtn, { backgroundColor: GOLD }]}>
+      <TouchableOpacity activeOpacity={0.85} disabled={!commercialQr.url} onPress={handleShare} style={[c.bigBtn, { backgroundColor: GOLD, opacity: commercialQr.url ? 1 : 0.5 }]}>
         <Feather name="share-2" size={18} color="#fff" />
         <Text style={c.bigBtnTxt}>{t("biz_share_whatsapp")}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
         activeOpacity={0.85}
+        disabled={!commercialQr.url}
         onPress={handleCopy}
-        style={[c.bigBtn, { backgroundColor: copied ? GREEN : CARD, borderWidth: 1, borderColor: copied ? GREEN : BORDER }]}
+        style={[c.bigBtn, { backgroundColor: copied ? GREEN : CARD, borderWidth: 1, borderColor: copied ? GREEN : BORDER, opacity: commercialQr.url ? 1 : 0.5 }]}
       >
         <Feather name={copied ? "check" : "copy"} size={18} color={copied ? "#fff" : BLUE} />
         <Text style={[c.bigBtnTxt, { color: copied ? "#fff" : BLUE }]}>
           {copied ? t("biz_link_copied") : t("biz_copy_link")}
         </Text>
       </TouchableOpacity>
+
+      <TouchableOpacity accessibilityRole="button" activeOpacity={0.85} disabled={!commercialQr.url}
+        onPress={() => { void handlePoster(); }}
+        style={[c.bigBtn, { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, opacity: commercialQr.url ? 1 : 0.5 }]}>
+        <Feather name="file-text" size={18} color={BLUE} />
+        <Text style={[c.bigBtnTxt, { color: BLUE }]}>{lang === "en" ? "Share A6 poster PDF" : "Compartir cartel PDF A6"}</Text>
+      </TouchableOpacity>
+
+      {!demo && isCloudId(config.businessId) && <View style={c.sectionCard}>
+        <Text style={c.sectionLabel}>{lang === "en" ? "Assign physical QR" : "Asignar QR físico"}</Text>
+        <Text style={{ color: GRAY, marginBottom: 8 }}>{lang === "en" ? "Enter the inventory ID printed on your support after ADMIN authorizes this company." : "Introduce el identificador del soporte después de que ADMIN autorice a esta empresa."}</Text>
+        <TextInput accessibilityLabel={lang === "en" ? "Physical QR inventory ID" : "Identificador del QR físico"}
+          value={physicalReference} onChangeText={value => { setPhysicalReference(value); setPhysicalPreview(null); }}
+          placeholder="GO-00000001" autoCapitalize="characters" editable={!physicalBusy}
+          style={{ borderWidth: 1, borderColor: BORDER, borderRadius: 10, minHeight: 44, paddingHorizontal: 12, color: TEXT }} />
+        <TouchableOpacity accessibilityRole="button" disabled={physicalBusy || !physicalReference.trim()} onPress={() => { void previewPhysical(); }} style={[c.bigBtn, { backgroundColor: BLUE, marginTop: 10, opacity: physicalBusy || !physicalReference.trim() ? 0.5 : 1 }]}>
+          <Text style={c.bigBtnTxt}>{lang === "en" ? "Check code" : "Comprobar código"}</Text>
+        </TouchableOpacity>
+        {physicalPreview && <Text style={{ color: GRAY, marginTop: 8 }}>{physicalPreview.inventoryId} · {physicalPreview.assignedHere ? (lang === "en" ? "Assigned to this company" : "Asignado a esta empresa") : physicalPreview.canAssign ? (lang === "en" ? "Ready to assign" : "Listo para asignar") : (lang === "en" ? "Not authorized for this company" : "No autorizado para esta empresa")}</Text>}
+        {physicalPreview?.canAssign && <TouchableOpacity accessibilityRole="button" disabled={physicalBusy} onPress={confirmPhysical} style={[c.bigBtn, { backgroundColor: GREEN, marginTop: 10 }]}><Text style={c.bigBtnTxt}>{lang === "en" ? "Confirm assignment" : "Confirmar asignación"}</Text></TouchableOpacity>}
+      </View>}
+
+      {!demo && supplierUrl && <TouchableOpacity accessibilityRole="link" accessibilityLabel={lang === "en" ? "Open A6 support supplier" : "Abrir proveedor de soporte A6"}
+        onPress={() => { void Linking.openURL(supplierUrl).catch(() => Alert.alert(lang === "en" ? "Supplier unavailable" : "Proveedor no disponible")); }}
+        style={[c.bigBtn, { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER }]}>
+        <Feather name="external-link" size={18} color={BLUE} />
+        <Text style={[c.bigBtnTxt, { color: BLUE }]}>{lang === "en" ? "Buy A6 support externally" : "Comprar soporte A6 en proveedor externo"}</Text>
+      </TouchableOpacity>}
 
       {!demo && onOpenVerificacion && (
         <TouchableOpacity

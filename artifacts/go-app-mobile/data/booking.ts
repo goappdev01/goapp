@@ -281,8 +281,9 @@ function getApiBase(): string {
 function isPublicBookingCatalogue(path: string, init: RequestInit): boolean {
   if ((init.method ?? "GET").toUpperCase() !== "GET") return false;
   const route = path.split("?")[0];
-  return ["/supabase/businesses", "/supabase/services", "/supabase/staff", "/supabase/availability", "/supabase/module-publication"].includes(route)
-    || /^\/supabase\/businesses\/[a-zA-Z0-9-]{1,64}\/services$/.test(route);
+  return ["/supabase/businesses", "/supabase/services", "/supabase/staff", "/supabase/availability", "/supabase/module-publication", "/commercial/supplier"].includes(route)
+    || /^\/supabase\/businesses\/[a-zA-Z0-9-]{1,64}\/services$/.test(route)
+    || /^\/commercial\/resolve\/(?:[0-9a-f-]{36}|[0-9a-f]{64})$/i.test(route);
 }
 
 async function performSupabaseRequest<T>(

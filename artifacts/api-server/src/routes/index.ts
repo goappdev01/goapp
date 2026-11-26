@@ -17,6 +17,7 @@ import boardsRouter from "./boards";
 import supportRouter from "./support";
 import sportsEventsRouter from "./sports-events";
 import shoppingRouter from "./shopping";
+import commercialQrRouter from "./commercialQr";
 
 const router: IRouter = Router();
 
@@ -25,6 +26,7 @@ router.use("/supabase/admin/finance", financialPlansRouter);
 router.use("/supabase/admin", adminRouter);
 router.use("/supabase/boards", boardsRouter);
 router.use("/supabase/shopping", shoppingRouter);
+router.use("/commercial", commercialQrRouter);
 router.use("/supabase/sports-events", sportsEventsRouter);
 router.use("/supabase/support", supportRouter);
 router.use("/booking-assistant", bookingAssistantRouter);

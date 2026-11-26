@@ -70,6 +70,8 @@ import * as Speech from "expo-speech";
 import { GoAiIdentity } from "@/components/ai/GoAiIdentity";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Linking from "expo-linking";
+import { useLocalSearchParams } from "expo-router";
+import { claimCommercialAcquisition, resolveCommercialCode } from "@/data/commercialQr";
 import * as Location from "expo-location";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -2481,6 +2483,7 @@ export default function HomeScreen() {
 
 function HomeScreenContent() {
   const insets = useSafeAreaInsets();
+  const { commercialCode, commercialRef } = useLocalSearchParams<{ commercialCode?: string; commercialRef?: string }>();
   const { t, lang, locale, setLang } = useLanguage();
 
   const localizeLabel = (label: string): string => {
@@ -2619,6 +2622,8 @@ function HomeScreenContent() {
   const [demoCustomerCalendarSelected, setDemoCustomerCalendarSelected] = useState(false);
   const [demoCalendarFocus, setDemoCalendarFocus] = useState<{ dateISO: string; timeHHMM: string; entryId: string; token: number }>();
   const [demoInitialBusinessId, setDemoInitialBusinessId] = useState<string>();
+  const [commercialInitialBusinessId, setCommercialInitialBusinessId] = useState<string>();
+  const commercialHandled = useRef("");
   const demoCalendarOwnerRef = useRef(adminAccess.userId);
   useEffect(() => {
     if (demoCalendarOwnerRef.current !== adminAccess.userId || goView.view !== "USER" || (!adminAccess.checking && !adminAccess.unavailable && !adminAccess.isOwner)) {
@@ -4401,6 +4406,24 @@ function HomeScreenContent() {
   const [monthGridOpen, setMonthGridOpen] = useState(false);
   const [reservasNavDay, setReservasNavDay] = useState<string | null>(null);
   const [showBookingFromCal, setShowBookingFromCal] = useState(false);
+  useEffect(() => {
+    if (!commercialCode || !adminAccess.userId || adminAccess.checking || !goView.loaded
+      || commercialHandled.current === `${commercialCode}:${commercialRef ?? ""}:${adminAccess.userId}`) return;
+    let current = true;
+    void resolveCommercialCode(commercialCode).then(businessId => {
+      if (!current || !businessId) return;
+      commercialHandled.current = `${commercialCode}:${commercialRef ?? ""}:${adminAccess.userId}`;
+      setDemoInitialBusinessId(undefined);
+      setCommercialInitialBusinessId(businessId);
+      setShowBookingFromCal(true);
+    });
+    return () => { current = false; };
+  }, [commercialCode, commercialRef, adminAccess.userId, adminAccess.checking, goView.loaded]);
+  useEffect(() => {
+    if (!commercialRef || !adminAccess.userId || adminAccess.checking) return;
+    // The server accepts only new accounts and preserves the first verified origin.
+    void claimCommercialAcquisition(commercialRef, adminAccess.userId);
+  }, [commercialCode, commercialRef, adminAccess.userId, adminAccess.checking]);
   const [bookingProposal, setBookingProposal] = useState<{ entry: GoEntry; actor: "customer" | "business"; dateISO: string; selection: BookingChangeSelection; repository?: import("@/data/demoBookingRepository").DemoBookingRepository } | null>(null);
   useEffect(() => { setBookingProposal(null); }, [goView.view, adminAccess.userId, demoBookingRepository]);
   const [bookingInitialDateISO, setBookingInitialDateISO] = useState<string | null>(null);
@@ -21047,11 +21070,11 @@ function HomeScreenContent() {
         {/* ── GO BOOKING — búsqueda de proveedor y reserva ──────────── */}
         <BookingSearchOverlay
           thumbSearch={goView.view === "USER"}
-          key={demoBookingRepository ? "demo_" + demoBookingRepository.ownerUserId : "real"}
+          key={!commercialInitialBusinessId && demoBookingRepository ? "demo_" + demoBookingRepository.ownerUserId : "real"}
           visible={showBookingFromCal && !adminAccess.checking && (!demoInitialBusinessId || !!demoBookingRepository)}
           initialDateISO={bookingInitialDateISO ?? undefined}
-          demoRepository={demoBookingRepository}
-          initialBusinessId={demoInitialBusinessId}
+          demoRepository={commercialInitialBusinessId ? undefined : demoBookingRepository}
+          initialBusinessId={commercialInitialBusinessId ?? demoInitialBusinessId}
           onDemoGoToBooking={(dateISO, timeHHMM, entryId) => {
             setShowBookingFromCal(false);
             setBookingInitialDateISO(null);
@@ -21060,7 +21083,7 @@ function HomeScreenContent() {
             setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid();
             setCalOpen(true);
           }}
-          onClose={() => { setShowBookingFromCal(false); setBookingInitialDateISO(null); setDemoInitialBusinessId(undefined); }}
+          onClose={() => { setShowBookingFromCal(false); setBookingInitialDateISO(null); setDemoInitialBusinessId(undefined); setCommercialInitialBusinessId(undefined); }}
           onDismissAll={() => {
             // Paso 1: cerrar el modal interior (BookingSearchOverlay) inmediatamente.
             // Como usa animationType="none", se desmonta en el siguiente frame.

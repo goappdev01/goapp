@@ -20,6 +20,7 @@ import { StatusBar }        from "expo-status-bar";
 import { DraggableFAB }     from "../DraggableFAB";
 import { AdminScreen }      from "./AdminScreen";
 import { BusinessTrialReviewPanel } from "./BusinessTrialReviewPanel";
+import { CommercialQrAdminPanel } from "./CommercialQrAdminPanel";
 import { PartnersScreen }   from "./PartnersScreen";
 import { PublicidadScreen } from "./PublicidadScreen";
 import { FacturacionScreen } from "./FacturacionScreen";
@@ -58,6 +59,7 @@ type AdminSection =
   | "sistema"
   | "metricas"
   | "empresas"
+  | "commercial_qr"
   | "roadmap"
   | "projections"
   | "modulos_empresa"
@@ -718,6 +720,7 @@ const SECTIONS: Array<{
   { key: "facturacion", label: "Facturación",     label_en: "Billing",       sublabel: "Facturas e ingresos",              sublabel_en: "Invoices and revenue",               icon: "file-text",   color: "#4A80BD" },
   { key: "metricas",    label: "Métricas",        label_en: "Metrics",       sublabel: "Campañas y conversión",            sublabel_en: "Campaigns and conversion",           icon: "activity",    color: "#7C69BE" },
   { key: "empresas",    label: "Empresas",        label_en: "Companies",     sublabel: "Negocios conectados",              sublabel_en: "Connected businesses",               icon: "briefcase",   color: "#8b5cf6" },
+  { key: "commercial_qr", label: "QR comerciales", label_en: "Commercial QR", sublabel: "Inventario y asignación", sublabel_en: "Inventory and assignment", icon: "grid", color: "#D8A83C" },
   { key: "sistema",     label: "Sistema",         label_en: "System",        sublabel: "Precios, límites y promos",        sublabel_en: "Prices, limits and promos",          icon: "settings",    color: "#ef4444" },
 ];
 
@@ -844,7 +847,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 8, paddingBottom: fabBottom + 152 }} showsVerticalScrollIndicator={false}>
             <Text style={[s.sectionTitle, { fontSize: 12, color: GRAY, paddingTop: 8 }]}>{lang === 'en' ? "MODULES" : "MÓDULOS"}</Text>
             <View style={s.sectGrid}>
-              {SECTIONS.filter(sec => sec.key !== "bridge" || (adminAccess.isOwner && !adminAccess.checking && goView.isAdminView)).map(sec => (
+              {SECTIONS.filter(sec => !["bridge", "commercial_qr"].includes(sec.key) || (adminAccess.isOwner && !adminAccess.checking && goView.isAdminView)).map(sec => (
                 <TouchableOpacity
                   key={sec.key}
                   style={s.sectCard}
@@ -1208,6 +1211,12 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
         {section === "empresas" && (
           <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: fabBottom + 152 }}>
             <BusinessTrialReviewPanel />
+          </ScrollView>
+        )}
+
+        {section === "commercial_qr" && adminAccess.isOwner && (
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, paddingBottom: fabBottom + 152 }}>
+            <CommercialQrAdminPanel />
           </ScrollView>
         )}
 

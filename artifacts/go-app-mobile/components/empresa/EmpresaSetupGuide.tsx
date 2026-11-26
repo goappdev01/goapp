@@ -46,6 +46,7 @@ import { trSector } from "@/data/goSectorTranslations";
 import type { Lang } from "@/i18n/translations";
 import { parsePartialBookingPercent } from "@/data/bookingServices";
 import { BookingDepositSplitRow } from "./BookingDepositSplitRow";
+import { useCommercialBusinessLink } from "@/data/commercialQr";
 
 // ─── Storage ────────────────────────────────────────────────────────────────
 
@@ -121,8 +122,6 @@ function buildSteps(t: (k: any) => string): StepDef[] {
     { key: "reserva",   icon: "share-2", color: GOLD,   title: t("biz_step_reserva_title"),   subtitle: t("biz_step_reserva_subtitle"),   label: t("biz_step_reserva_label")  },
   ];
 }
-
-const MOCK_LINK = "https://go.teso.app/b/mi-negocio";
 
 // ─── Day picker / Horarios y Servicios (Step 2) ───────────────────────────────
 
@@ -813,6 +812,8 @@ function Step3ReservaPublicacion({
 }) {
   const { t, lang } = useLanguage();
   const [copied, setCopied] = useState(false);
+  const { config, demo } = useBusinessConfig();
+  const commercialQr = useCommercialBusinessLink(config.businessId, !!demo);
 
   const sinPago = payment === 0;
   const PAYMENT_OPTS = buildPaymentOpts(t);
@@ -820,15 +821,17 @@ function Step3ReservaPublicacion({
   const CANCEL_OPTS = buildCancelOpts(t);
 
   const handleShare = async () => {
+    if (!commercialQr.url) return;
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await Share.share({ message: `${t("biz_book_via_go")}\n${MOCK_LINK}`, url: MOCK_LINK, title: t("biz_book_in_business") });
+      await Share.share({ message: `${t("biz_book_via_go")}\n${commercialQr.url}`, url: commercialQr.url, title: t("biz_book_in_business") });
     } catch { /* silencioso */ }
   };
 
   const handleCopy = async () => {
+    if (!commercialQr.url) return;
     try {
-      await Clipboard.setStringAsync(MOCK_LINK);
+      await Clipboard.setStringAsync(commercialQr.url);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
@@ -863,18 +866,18 @@ function Step3ReservaPublicacion({
 
       {/* ── Share / QR ── */}
       <View style={[g.sectionCard, { alignItems: "center", paddingVertical: 20 }]}>
-        <View style={g.qrWrapper}>
-          <QRCode value={MOCK_LINK} size={150} backgroundColor="#FFFFFF" color="#111827" />
-        </View>
-        <Text style={g.qrLinkTxt}>{MOCK_LINK}</Text>
+        {commercialQr.url ? <View style={g.qrWrapper}>
+          <QRCode value={commercialQr.url} size={150} backgroundColor="#FFFFFF" color="#111827" />
+        </View> : null}
+        <Text style={g.qrLinkTxt}>{commercialQr.url ?? (lang === "en" ? "Public booking link unavailable" : "Enlace público de reservas no disponible")}</Text>
       </View>
 
-      <TouchableOpacity activeOpacity={0.85} onPress={handleShare} style={[g.bigBtn, { backgroundColor: GOLD }]}>
+      <TouchableOpacity activeOpacity={0.85} disabled={!commercialQr.url} onPress={handleShare} style={[g.bigBtn, { backgroundColor: GOLD, opacity: commercialQr.url ? 1 : 0.5 }]}>
         <Feather name="share-2" size={18} color="#fff" />
         <Text style={g.bigBtnTxt}>{t("biz_share_whatsapp")}</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity activeOpacity={0.85} onPress={handleCopy} style={[g.bigBtn, { backgroundColor: copied ? GREEN : CARD, borderWidth: 1, borderColor: copied ? GREEN : BORDER }]}>
+      <TouchableOpacity activeOpacity={0.85} disabled={!commercialQr.url} onPress={handleCopy} style={[g.bigBtn, { backgroundColor: copied ? GREEN : CARD, borderWidth: 1, borderColor: copied ? GREEN : BORDER, opacity: commercialQr.url ? 1 : 0.5 }]}>
         <Feather name={copied ? "check" : "copy"} size={18} color={copied ? "#fff" : BLUE} />
         <Text style={[g.bigBtnTxt, { color: copied ? "#fff" : BLUE }]}>
           {copied ? t("biz_link_copied") : t("biz_copy_link")}
