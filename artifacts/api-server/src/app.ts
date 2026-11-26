@@ -33,6 +33,7 @@ app.use("/api/supabase/shopping", express.json({ limit: "5mb" }));
 // Solo los documentos de alta admiten el cuerpo base64; el resto conserva el límite general.
 app.use("/api/supabase/manage/trial/documents", express.json({ limit: "7mb" }));
 app.use(/^\/api\/supabase\/manage\/businesses\/[0-9a-f-]{36}\/catalog-import\/extract$/i, express.json({ limit: "7mb" }));
+app.use(/^\/api\/supabase\/manage\/businesses\/[0-9a-f-]{36}\/catalog-import\/ai\/interpret$/i, express.json({ limit: "7mb" }));
 app.use(/^\/api\/supabase\/manage\/businesses\/[0-9a-f-]{36}\/catalog-photos$/i, express.json({ limit: "1500kb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

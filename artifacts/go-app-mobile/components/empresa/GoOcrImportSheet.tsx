@@ -2,9 +2,12 @@
  * GoOcrImportSheet
  * ─────────────────────────────────────────────────────────────────────────────
  * Modal unificado para importar servicios desde imagen, PDF o enlace web.
+ * GO IA usa aquí el mismo revisor, pero su entrada queda bloqueada hasta que
+ * exista un intérprete empresarial autorizado por el servidor.
  *
  * Fases:
  *   url_input  → (solo isUrl=true) El usuario pega/escribe la URL
+ *   ai_input   → borrador local; no interpreta ni envía al abrir
  *   processing → Animación de escaneo mientras se analiza la fuente
  *   review     → Lista editable con checkboxes para confirmar la importación
  *   error      → Mensaje de error + botón reintentar
@@ -32,7 +35,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { extractCatalogFile, extractPublicCatalog, type CatalogImportService } from "@/data/catalogImport";
+import { extractCatalogFile, extractPublicCatalog, interpretCatalogWithGoAi, type CatalogImportCandidate, type CatalogImportService } from "@/data/catalogImport";
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 
@@ -52,7 +55,7 @@ const RED    = "#EF4444";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type Phase = "url_input" | "processing" | "review" | "error";
+type Phase = "url_input" | "ai_input" | "processing" | "review" | "error";
 
 type ExtractedSvc = {
   id:          string;
@@ -71,6 +74,11 @@ export type GoOcrImportSheetProps = {
   visible:   boolean;
   sourceFile?: { source: "image" | "pdf"; mime: string; content_base64: string } | null;
   isUrl?:    boolean;
+  isAi?: boolean;
+  aiAvailable?: boolean;
+  onChooseAiImage?: () => void;
+  onChooseAiPdf?: () => void;
+  onRemoveAiFile?: () => void;
   defaultKind?: "service" | "product";
   businessId: string;
   onClose:   () => void;
@@ -100,6 +108,11 @@ export function GoOcrImportSheet({
   visible,
   sourceFile,
   isUrl = false,
+  isAi = false,
+  aiAvailable = false,
+  onChooseAiImage,
+  onChooseAiPdf,
+  onRemoveAiFile,
   defaultKind = "service",
   businessId,
   onClose,
@@ -115,6 +128,8 @@ export function GoOcrImportSheet({
   const [errorMsg, setErrorMsg] = useState("");
   const [hintIdx,  setHintIdx]  = useState(0);
   const [url,      setUrl]      = useState("");
+  const [aiText, setAiText] = useState("");
+  const [aiConsent, setAiConsent] = useState(false);
   const [saving, setSaving] = useState(false);
   const extractionGeneration = useRef(0);
 
@@ -136,7 +151,11 @@ export function GoOcrImportSheet({
   useEffect(() => {
     extractionGeneration.current++;
     if (visible) {
-      if (isUrl) {
+      if (isAi) {
+        setPhase("ai_input");
+        setAiText("");
+        setAiConsent(false);
+      } else if (isUrl) {
         setPhase("url_input");
         setUrl("");
       } else {
@@ -187,6 +206,17 @@ export function GoOcrImportSheet({
 
   // ── API call ──────────────────────────────────────────────────────────────
 
+  const showCandidates = (candidates: CatalogImportCandidate[], file?: NonNullable<typeof sourceFile>) => {
+    setSvcs(candidates.map((sv, i) => ({
+      id: `ex_${Date.now()}_${i}`, name: sv.name,
+      priceInput: sv.price === null ? "" : String(sv.price),
+      durationInput: sv.duration === null ? "" : String(sv.duration),
+      description: sv.description, category: sv.category ?? "", variant: sv.variant ?? "",
+      kind: defaultKind, needsReview: sv.needsReview === true || !!file || isAi, selected: true,
+    })));
+    setPhase("review");
+  };
+
   const doExtract = async (extractUrl?: string, file?: NonNullable<typeof sourceFile>) => {
     const generation = ++extractionGeneration.current;
     setPhase("processing");
@@ -199,24 +229,24 @@ export function GoOcrImportSheet({
       const candidates = extractUrl ? await extractPublicCatalog(businessId, extractUrl)
         : await extractCatalogFile(businessId, file!.source, file!.mime, file!.content_base64);
       if (generation !== extractionGeneration.current) return;
-      const extracted: ExtractedSvc[] = candidates.map((sv, i) => ({
-        id:          `ex_${Date.now()}_${i}`,
-        name:        sv.name,
-        priceInput:  sv.price === null ? "" : String(sv.price),
-        durationInput: sv.duration === null ? "" : String(sv.duration),
-        description: sv.description,
-        category: sv.category ?? "",
-        variant: sv.variant ?? "",
-        kind: defaultKind,
-        needsReview: sv.needsReview === true || !!file,
-        selected:    true,
-      }));
-
-      setSvcs(extracted);
-      setPhase("review");
+      showCandidates(candidates, file);
     } catch (err: any) {
       if (generation !== extractionGeneration.current) return;
       setErrorMsg(err?.message || "No se pudo leer el catálogo. No se importó nada.");
+      setPhase("error");
+    }
+  };
+
+  const handleAiInterpret = async () => {
+    if (!aiAvailable || !aiConsent || (!aiText.trim() && !sourceFile)) return;
+    const generation = ++extractionGeneration.current;
+    setPhase("processing"); setErrorMsg("");
+    try {
+      const candidates = await interpretCatalogWithGoAi(businessId, aiText, sourceFile ?? null, aiConsent);
+      if (generation === extractionGeneration.current) showCandidates(candidates, sourceFile ?? undefined);
+    } catch (error) {
+      if (generation !== extractionGeneration.current) return;
+      setErrorMsg(error instanceof Error ? error.message : "GO IA no ha podido interpretar el catálogo. No se guardó nada.");
       setPhase("error");
     }
   };
@@ -294,14 +324,15 @@ export function GoOcrImportSheet({
 
   // ── Header metadata ───────────────────────────────────────────────────────
 
-  const sourceIcon: any  = isUrl ? "globe"     : isPdf ? "file-text" : "camera";
-  const sourceColor      = isUrl ? TEAL         : isPdf ? PURPLE      : BLUE;
-  const sourceLabelShort = isUrl
+  const sourceIcon: any  = isAi ? "message-circle" : isUrl ? "globe" : isPdf ? "file-text" : "camera";
+  const sourceColor      = isAi ? "#A17721" : isUrl ? TEAL : isPdf ? PURPLE : BLUE;
+  const sourceLabelShort = isAi ? "GO IA" : isUrl
     ? (lang === "en" ? "Web link"   : "Enlace web")
     : isPdf
       ? (lang === "en" ? "From PDF"    : "Desde PDF")
       : (lang === "en" ? "From image"  : "Desde imagen");
   const headerTitle =
+    phase === "ai_input" ? (lang === "en" ? "Import with GO AI" : "Importar con GO IA") :
     phase === "url_input"  ? (lang === "en" ? "Import from link"   : "Importar desde enlace") :
     phase === "processing" ? (lang === "en" ? "Importing rate card" : "Importando tarifa")     :
     phase === "review"     ? (lang === "en" ? "Review and confirm"  : "Revisar y confirmar")   :
@@ -393,6 +424,50 @@ export function GoOcrImportSheet({
             : "GO leerá la página e intentará detectar el catálogo automáticamente. Siempre podrás revisar y corregir antes de guardar."}
         </Text>
       </View>
+    </ScrollView>
+  );
+
+  const renderAiInput = () => (
+    <ScrollView style={s.urlScroll} contentContainerStyle={s.urlScrollContent}
+      keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <Text style={s.urlTitle}>{lang === "en" ? "Describe your catalogue" : "Describe tu catálogo"}</Text>
+      <Text style={s.urlSubtitle}>{lang === "en"
+        ? "Write or dictate with the keyboard microphone. You can also attach a photo or PDF. Nothing is sent when you open this screen."
+        : "Escribe o dicta con el micrófono del teclado. También puedes adjuntar una foto o PDF. Al abrir esta pantalla no se envía nada."}</Text>
+      <TextInput testID="catalog-ai-text" style={[s.svcNameInput, { minHeight: 116, textAlignVertical: "top", marginBottom: 12 }]}
+        multiline maxLength={4000} value={aiText} onChangeText={setAiText}
+        placeholder={lang === "en" ? "e.g. Haircut 25 €, 30 min; colour 45 €, 90 min" : "Ej.: Corte 25 €, 30 min; tinte 45 €, 90 min"}
+        placeholderTextColor={DIM} accessibilityLabel={lang === "en" ? "Catalogue text" : "Texto del catálogo"} />
+      <View style={{ flexDirection: "row", gap: 10, marginBottom: 12 }}>
+        <TouchableOpacity testID="catalog-ai-photo" accessibilityRole="button" onPress={onChooseAiImage}
+          style={[s.retryBtn, { flex: 1 }]}><Feather name="camera" size={15} color={BLUE} />
+          <Text style={s.retryBtnTxt}>{lang === "en" ? "Photo" : "Fotografía"}</Text></TouchableOpacity>
+        <TouchableOpacity testID="catalog-ai-pdf" accessibilityRole="button" onPress={onChooseAiPdf}
+          style={[s.retryBtn, { flex: 1 }]}><Feather name="file-text" size={15} color={PURPLE} />
+          <Text style={s.retryBtnTxt}>PDF</Text></TouchableOpacity>
+      </View>
+      {!!sourceFile && <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <Text style={{ color: TEXT, flex: 1 }}>{sourceFile.source === "pdf" ? "PDF" : (lang === "en" ? "Photo" : "Fotografía")} {lang === "en" ? "attached locally" : "adjunto localmente"}</Text>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={lang === "en" ? "Remove attachment" : "Quitar adjunto"}
+          onPress={() => onRemoveAiFile?.()}><Feather name="x" size={18} color={GRAY} /></TouchableOpacity>
+      </View>}
+      <TouchableOpacity testID="catalog-ai-consent" accessibilityRole="checkbox" accessibilityState={{ checked: aiConsent }}
+        onPress={() => setAiConsent(value => !value)} style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 14 }}>
+        <Feather name={aiConsent ? "check-square" : "square"} size={19} color={aiConsent ? TEAL : GRAY} />
+        <Text style={{ color: TEXT, flex: 1, fontSize: 13, lineHeight: 19 }}>{lang === "en"
+          ? "I authorise sending only this text and attachment to OpenAI through GO AI to interpret my catalogue. I will review the result before saving."
+          : "Autorizo enviar solo este texto y adjunto a OpenAI mediante GO IA para interpretar mi catálogo. Revisaré el resultado antes de guardar."}</Text>
+      </TouchableOpacity>
+      {!aiAvailable && <Text accessibilityRole="alert" style={{ color: GRAY, fontSize: 13, marginBottom: 14 }}>
+        {lang === "en" ? "GO AI catalogue interpretation is not active. Nothing has been sent or saved. Use photo, PDF or web import instead."
+          : "La interpretación de catálogos con GO IA no está activa. No se ha enviado ni guardado nada. Puedes usar fotografía, PDF o web."}
+      </Text>}
+      <TouchableOpacity testID="catalog-ai-interpret" accessibilityRole="button" onPress={() => { void handleAiInterpret(); }}
+        disabled={!aiAvailable || !aiConsent || (!aiText.trim() && !sourceFile)}
+        style={[s.analyzeBtn, (!aiAvailable || !aiConsent || (!aiText.trim() && !sourceFile)) && s.analyzeBtnDisabled]}>
+        <Feather name="message-circle" size={15} color="#fff" />
+        <Text style={s.analyzeBtnTxt}>{lang === "en" ? "Interpret with GO AI" : "Interpretar con GO IA"}</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 
@@ -583,6 +658,10 @@ export function GoOcrImportSheet({
         <Feather name="refresh-cw" size={14} color={BLUE} />
         <Text style={s.retryBtnTxt}>{lang === "en" ? "Try again" : "Intentar de nuevo"}</Text>
       </TouchableOpacity>}
+      {isAi && <TouchableOpacity onPress={() => setPhase("ai_input")} style={s.retryBtn} activeOpacity={0.8}>
+        <Feather name="edit-2" size={14} color={BLUE} />
+        <Text style={s.retryBtnTxt}>{lang === "en" ? "Review request" : "Revisar solicitud"}</Text>
+      </TouchableOpacity>}
       {!!sourceFile && <TouchableOpacity onPress={() => doExtract(undefined, sourceFile)} style={s.retryBtn} activeOpacity={0.8}>
         <Feather name="refresh-cw" size={14} color={BLUE} />
         <Text style={s.retryBtnTxt}>{lang === "en" ? "Try again" : "Intentar de nuevo"}</Text>
@@ -630,6 +709,7 @@ export function GoOcrImportSheet({
           {/* Body */}
           <View style={s.body}>
             {phase === "url_input"  && renderUrlInput()}
+            {phase === "ai_input" && renderAiInput()}
             {phase === "processing" && renderProcessing()}
             {phase === "review"     && renderReview()}
             {phase === "error"      && renderError()}

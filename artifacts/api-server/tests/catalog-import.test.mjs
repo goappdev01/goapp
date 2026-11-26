@@ -78,13 +78,19 @@ test('catalog import checks owner, validates review and only confirms via authen
   const item = { name: 'Corte', description: '', duration: 30, price: 25, capacity: 1 };
   try {
     assert.equal((await post('/confirm', { services: [item] }, false)).status, 401);
+    assert.equal((await post('/ai/interpret', { text: 'Corte 25 €', consent: true }, false)).status, 401);
     assert.equal((await post('/extract', { source: 'pdf' })).status, 400);
     assert.equal((await post('/confirm', { services: [{ ...item, duration: null }] })).status, 400);
     assert.equal(rpc.length, 0);
     owns = false;
     assert.equal((await post('/confirm', { services: [item] })).status, 404);
+    assert.equal((await post('/ai/interpret', { text: 'Corte 25 €', consent: true })).status, 404);
     assert.equal(rpc.length, 0);
     owns = true;
+    const ai = await post('/ai/interpret', { text: 'Corte 25 €', consent: true });
+    assert.equal(ai.status, 503);
+    assert.equal((await ai.json()).code, 'CATALOG_AI_UNAVAILABLE');
+    assert.equal(rpc.length, 0, 'Unavailable GO AI cannot import or call another service');
     const result = await post('/confirm', { services: [item] });
     assert.equal(result.status, 200);
     assert.equal((await result.json()).imported, 1);

@@ -113,6 +113,15 @@ router.get("/businesses/:businessId/catalog-import/capabilities", async (req, re
   const available = await catalogDocumentCapabilities();
   res.json({ url: true, ...available, goAi: false });
 });
+// Prepared GO IA contract. The existing central conversation is ADMIN-only and
+// cannot authorize a business catalogue request. Keep this route closed until
+// a business-scoped interpreter, privacy controls and usage budget are deployed.
+router.post("/businesses/:businessId/catalog-import/ai/interpret", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  if (!await ownsBusiness(req, res)) return;
+  res.status(503).json({ code: "CATALOG_AI_UNAVAILABLE",
+    error: "La interpretación de catálogos con GO IA aún no está disponible. No se ha enviado ni guardado nada." });
+});
 router.post("/businesses/:businessId/catalog-import/extract", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   const body = req.body ?? {};

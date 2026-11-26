@@ -33,6 +33,25 @@ export async function extractCatalogFile(businessId: string, source: "image" | "
   return result.services;
 }
 
+/** Prepared business-scoped GO IA contract. The server currently advertises goAi=false;
+ * opening the draft never calls this endpoint or sends a file. */
+export async function interpretCatalogWithGoAi(businessId: string, text: string,
+  file: { source: "image" | "pdf"; mime: string; content_base64: string } | null,
+  consent: boolean): Promise<CatalogImportCandidate[]> {
+  const user = await identity(businessId);
+  if (!consent) throw new Error("Autoriza el envío a GO IA para interpretar este catálogo.");
+  const message = text.trim();
+  if (!message && !file) throw new Error("Escribe el catálogo o adjunta una fotografía o PDF.");
+  if (message.length > 4000) throw new Error("El texto supera el límite de 4000 caracteres.");
+  const capabilities = await catalogImportCapabilities(businessId);
+  if (!capabilities.goAi) throw new Error("La interpretación de catálogos con GO IA aún no está disponible. No se ha enviado nada.");
+  const result = await supabaseApiRequest<{ ok: boolean; services: CatalogImportCandidate[] }>(
+    `/supabase/manage/businesses/${businessId}/catalog-import/ai/interpret`,
+    { method: "POST", body: JSON.stringify({ text: message, ...(file ?? {}), consent: true }) }, true, user);
+  if (result?.ok !== true || !Array.isArray(result.services)) throw new Error("GO IA no ha devuelto un catálogo revisable. No se guardó nada.");
+  return result.services;
+}
+
 export type CatalogImportUsage = { days: { day: string; method: "direct" | "ocr" | "mixed" | "pdf"; outcome: "success" | "insufficient" | "error"; count: number }[];
   aiAvailable: boolean; aiCalls: number; inputTokens: number; outputTokens: number; estimatedCostEur: number | null };
 

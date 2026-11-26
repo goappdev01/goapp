@@ -2570,6 +2570,9 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
   // ── OCR import state ────────────────────────────────────────────────────────
   const [ocrVisible,   setOcrVisible]   = useState(false);
   const [ocrIsUrl,     setOcrIsUrl]     = useState(false);
+  const [ocrIsAi, setOcrIsAi] = useState(false);
+  const [goAiAvailable, setGoAiAvailable] = useState(false);
+  const aiCapabilityGeneration = useRef(0);
   const [ocrFile, setOcrFile] = useState<{ source: "image" | "pdf"; mime: string; content_base64: string } | null>(null);
 
   const patchSvc = (id: string, patch: Partial<SavedService>) =>
@@ -2585,11 +2588,13 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     setLocalSvcs(prev => [...prev, { id: `svc_${Date.now()}`, name: "", duration: 30, price: 0, capacity: 1 }]);
   };
 
-  const openImage = async (camera: boolean) => {
+  const openImage = async (camera: boolean, forAi = false) => {
     if (demo) { blockDemoExternal(lang); return; }
     try {
-      const capability = await catalogImportCapabilities(config.businessId ?? "");
-      if (!capability.image) throw new Error("La lectura de fotografías no está disponible en este momento.");
+      if (!forAi) {
+        const capability = await catalogImportCapabilities(config.businessId ?? "");
+        if (!capability.image) throw new Error("La lectura de fotografías no está disponible en este momento.");
+      }
       if (camera && !(await ImagePicker.requestCameraPermissionsAsync()).granted) return;
       const picked = await (camera ? ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.75, base64: true })
         : ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.75, base64: true }));
@@ -2598,7 +2603,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
       const mime = asset.base64?.startsWith("iVBOR") ? "image/png" : asset.base64?.startsWith("/9j/") ? "image/jpeg" : "";
       if (!mime || !asset.base64 || asset.base64.length > 7_000_000) throw new Error("Elige una imagen JPG o PNG de hasta 5 MB.");
       setOcrFile({ source: "image", mime, content_base64: asset.base64 });
-      setOcrIsUrl(false); setOcrVisible(true);
+      if (!forAi) { setOcrIsAi(false); setOcrIsUrl(false); setOcrVisible(true); }
     } catch (error) { Alert.alert("Fotografía", error instanceof Error ? error.message : "No se pudo abrir la fotografía."); }
   };
   const handleImageImport = () => {
@@ -2610,11 +2615,13 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
   };
 
   // ── OCR: launch PDF picker ──────────────────────────────────────────────────
-  const handlePdfImport = async () => {
+  const handlePdfImport = async (forAi = false) => {
     if (demo) { blockDemoExternal(lang); return; }
     try {
-      const capability = await catalogImportCapabilities(config.businessId ?? "");
-      if (!capability.pdf) throw new Error("La lectura de PDF no está disponible en este momento.");
+      if (!forAi) {
+        const capability = await catalogImportCapabilities(config.businessId ?? "");
+        if (!capability.pdf) throw new Error("La lectura de PDF no está disponible en este momento.");
+      }
       const picked = await DocumentPicker.getDocumentAsync({ type: "application/pdf", copyToCacheDirectory: true, multiple: false });
       if (picked.canceled || !picked.assets?.[0]) return;
       const asset = picked.assets[0];
@@ -2622,7 +2629,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
       const content_base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
       if (content_base64.length > 7_000_000) throw new Error("El PDF supera 5 MB.");
       setOcrFile({ source: "pdf", mime: "application/pdf", content_base64 });
-      setOcrIsUrl(false); setOcrVisible(true);
+      if (!forAi) { setOcrIsAi(false); setOcrIsUrl(false); setOcrVisible(true); }
     } catch (error) { Alert.alert("PDF", error instanceof Error ? error.message : "No se pudo abrir el PDF."); }
   };
 
@@ -2631,8 +2638,23 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     if (demo) { blockDemoExternal(lang); return; }
     Haptics.selectionAsync().catch(() => {});
     setOcrFile(null);
+    setOcrIsAi(false);
     setOcrIsUrl(true);
     setOcrVisible(true);
+  };
+
+  const handleGoAiImport = async () => {
+    if (demo) { blockDemoExternal(lang); return; }
+    const generation = ++aiCapabilityGeneration.current;
+    setOcrFile(null);
+    setGoAiAvailable(false);
+    setOcrIsUrl(false);
+    setOcrIsAi(true);
+    setOcrVisible(true);
+    try {
+      const capability = await catalogImportCapabilities(config.businessId ?? "");
+      if (generation === aiCapabilityGeneration.current) setGoAiAvailable(capability.goAi === true);
+    } catch { /* The draft stays local and interpretation remains disabled. */ }
   };
 
   // ── OCR: import confirmed services ──────────────────────────────────────────
@@ -2646,6 +2668,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     })));
     reloadConfig();
     setOcrIsUrl(false);
+    setOcrIsAi(false);
     setOcrFile(null);
     setOcrVisible(false);
     if (result.imported === 0) Alert.alert("Sin cambios", "Los servicios seleccionados ya están en el catálogo de esta empresa.");
@@ -2790,7 +2813,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
           {/* PDF */}
           <TouchableOpacity
             testID="service-import-pdf"
-            onPress={handlePdfImport}
+            onPress={() => { void handlePdfImport(); }}
             activeOpacity={0.8}
             style={c.importBtn}
           >
@@ -2817,6 +2840,16 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
           <Feather name="chevron-right" size={16} color={GREEN} />
         </TouchableOpacity>
 
+        <TouchableOpacity testID="service-import-go-ai" accessibilityRole="button"
+          onPress={() => { void handleGoAiImport(); }} activeOpacity={0.8}
+          style={[c.importUrlBtn, { marginTop: 10, backgroundColor: GOLD + "08" }]}>
+          <View style={[c.importBtnIconWrap, { backgroundColor: GOLD + "16", width: 36, height: 36, borderRadius: 10 }]}>
+            <Feather name="message-circle" size={17} color={GOLD} />
+          </View>
+          <View style={{ flex: 1 }}><Text style={c.importBtnLabel}>{lang === "en" ? "By GO AI" : "Por GO IA"}</Text></View>
+          <Feather name="chevron-right" size={16} color={GOLD} />
+        </TouchableOpacity>
+
       </View>
 
       {/* OCR Review Sheet */}
@@ -2824,9 +2857,18 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
         visible={ocrVisible}
         sourceFile={ocrFile}
         isUrl={ocrIsUrl}
+        isAi={ocrIsAi}
+        aiAvailable={goAiAvailable}
+        onChooseAiImage={() => Alert.alert(lang === "en" ? "Photo" : "Fotografía", lang === "en" ? "Choose a source" : "Selecciona una fuente", [
+          { text: lang === "en" ? "Gallery" : "Galería", onPress: () => { void openImage(false, true); } },
+          { text: lang === "en" ? "Camera" : "Cámara", onPress: () => { void openImage(true, true); } },
+          { text: lang === "en" ? "Cancel" : "Cancelar", style: "cancel" },
+        ])}
+        onChooseAiPdf={() => { void handlePdfImport(true); }}
+        onRemoveAiFile={() => setOcrFile(null)}
         defaultKind={["restaurante", "cafeteria", "bar", "comida_rapida", "confiteria"].includes(config.subId ?? "") ? "product" : "service"}
         businessId={config.businessId ?? ""}
-        onClose={() => { setOcrVisible(false); setOcrIsUrl(false); setOcrFile(null); }}
+        onClose={() => { aiCapabilityGeneration.current++; setOcrVisible(false); setOcrIsUrl(false); setOcrIsAi(false); setOcrFile(null); }}
         onImport={handleOcrImport}
       />}
     </View>

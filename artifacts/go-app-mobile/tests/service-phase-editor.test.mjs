@@ -27,6 +27,7 @@ async function fixture(service=tint(),{lang='es',resources=[],delay=false}={}){
   useBusinessConfig:()=>React.useContext(Context),useLanguage:()=>({lang,t:key=>translations[lang][key]??key}),...timing,...adapter,newTimingId:(()=>{let n=0;return()=>`new-${++n}`;})(),
   BLUE:'#1D4ED8',TEXT:'#111827',GRAY:'#374151',DIM:'#4B5563',RED:'#B91C1C',PURPLE:'#7E22CE',GREEN:'#166534',GOLD:'#C9A84C',c:{svcRow:serviceCardStyle,...presentationStyles},trSector:value=>value,Feather:native('Feather'),
   CatalogAssociationManager:()=>null,BookingResourcesEditor:()=>null,GoOcrImportSheet:native('GoOcrImportSheet'),
+  catalogImportCapabilities:async()=>({url:true,image:true,pdf:true,goAi:false}),
   useServiceComplementCatalog:()=>({error:null}),ServiceAssociatedProducts:()=>null,CatalogPhotoButton:native('CatalogPhotoButton'),
   isSharedCatalogPhotoReference:()=>false,isCatalogStorageReference:()=>false,
   Haptics:{selectionAsync:async()=>{}},Alert:{alert:(...args)=>alerts.push(args)},
@@ -174,28 +175,32 @@ test('only service names are centered and remain editable and persisted without 
  }finally{await f.close();}
 });
 
-for(const lang of ['es','en'])test(lang+': three import choices preserve layout and unavailable OCR never opens private files',async()=>{
+for(const lang of ['es','en'])test(lang+': four import choices preserve layout and inactive GO AI never sends a request',async()=>{
  const f=await fixture(tint(),{lang});try{
-  const buttons=['image','pdf','web'].map(kind=>f.get('service-import-'+kind));assert.ok(buttons.every(button=>typeof button.onPress==='function'));
+  const buttons=['image','pdf','web','go-ai'].map(kind=>f.get('service-import-'+kind));assert.ok(buttons.every(button=>typeof button.onPress==='function'));
   const body=f.container.textContent;for(const key of ['biz_import_image_label','biz_import_pdf_label','biz_import_link_label'])assert.ok(body.includes(translations[lang][key]));
   for(const key of ['biz_import_image_sub','biz_import_pdf_sub','biz_import_link_sub'])assert.ok(!body.includes(translations[lang][key]));
   assert.doesNotMatch(body,/GO detectará nombres, precios y duraciones automáticamente/);
   assert.equal(f.visible().filter(p=>p.native==='Feather'&&p.name==='camera').length,1);assert.equal(f.visible().filter(p=>p.native==='Feather'&&p.name==='file-text').length,1);assert.equal(f.visible().filter(p=>p.native==='Feather'&&p.name==='globe').length,1);
   assert.ok(buttons[0].style.borderWidth>0);assert.equal(buttons[0].style,buttons[1].style);assert.ok(presentationStyles.importBtnsRow.gap>=10);assert.ok(presentationStyles.importBtnsRow.marginHorizontal>0);assert.ok(presentationStyles.importUrlBtn.marginHorizontal>0);
-  await f.settle(()=>buttons[0].onPress());assert.match(f.alerts.at(-1)[1],lang==='es'?/OCR autorizado/:/authorised OCR/);assert.equal(f.imports.image,0);
-  await f.settle(()=>buttons[1].onPress());assert.match(f.alerts.at(-1)[1],lang==='es'?/extractor autorizado/:/authorised extractor/);assert.equal(f.imports.pdf,0);
-  await f.settle(()=>buttons[2].onPress());const sheet=f.visible().find(p=>p.native==='GoOcrImportSheet');assert.equal(sheet.visible,true);assert.equal(sheet.isUrl,true);assert.equal(sheet.sourceUri,null);
+  await f.settle(()=>buttons[0].onPress());assert.match(f.alerts.at(-1)[1],/Selecciona la fuente del catálogo/);assert.equal(f.imports.image,0);
+  await f.settle(()=>buttons[1].onPress());assert.equal(f.imports.pdf,1);
+  await f.settle(()=>buttons[2].onPress());const sheet=f.visible().find(p=>p.native==='GoOcrImportSheet');assert.equal(sheet.visible,true);assert.equal(sheet.isUrl,true);assert.equal(sheet.sourceFile,null);
   await f.settle(()=>sheet.onClose());assert.equal(f.visible().find(p=>p.native==='GoOcrImportSheet').visible,false);assert.equal(f.calls.length,0,'Opening import options must not alter services');
+  await f.settle(()=>buttons[3].onPress());const ai=f.visible().find(p=>p.native==='GoOcrImportSheet');
+  assert.equal(ai.visible,true);assert.equal(ai.isAi,true);assert.equal(ai.aiAvailable,false);
+  assert.equal(f.imports.image,0);assert.equal(f.imports.pdf,1);assert.equal(f.calls.length,0);
+  await f.settle(()=>ai.onClose());
  }finally{await f.close();}
 });
 
-test('the import heading starts with uppercase O and its text and all three independent borders have sufficient contrast',async()=>{
+test('the import heading and all four independent borders have sufficient contrast',async()=>{
  const luminance=hex=>{const rgb=hex.slice(1).match(/../g).map(value=>parseInt(value,16)/255).map(value=>value<=0.04045?value/12.92:((value+0.055)/1.055)**2.4);return rgb[0]*0.2126+rgb[1]*0.7152+rgb[2]*0.0722;};
  const contrast=(a,b)=>{const values=[luminance(a),luminance(b)].sort((a,b)=>b-a);return(values[0]+0.05)/(values[1]+0.05);};
  const f=await fixture();try{
   assert.equal(translations.es.biz_import_from_price_list,'O importar desde tarifa');assert.ok(f.container.textContent.includes('O importar desde tarifa'));
   assert.ok(contrast(presentationStyles.importDividerTxt.color,'#FFFFFF')>=4.5);
-  for(const kind of ['image','pdf','web']){const button=f.get('service-import-'+kind);assert.ok(button.style.borderWidth>=1.5);for(const background of ['#FFFFFF','#FAFAFA','#F7F8FA'])assert.ok(contrast(button.style.borderColor,background)>=3);}
+  for(const kind of ['image','pdf','web','go-ai']){const button=f.get('service-import-'+kind),style=Array.isArray(button.style)?button.style[0]:button.style;assert.ok(style.borderWidth>=1.5);for(const background of ['#FFFFFF','#FAFAFA','#F7F8FA'])assert.ok(contrast(style.borderColor,background)>=3);}
   assert.equal(f.calls.length,0);
  }finally{await f.close();}
 });

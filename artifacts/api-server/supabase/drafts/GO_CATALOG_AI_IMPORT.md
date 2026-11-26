@@ -1,0 +1,7 @@
+# GO IA para importación de catálogos
+
+El selector empresarial ofrece fotografía, PDF, web y GO IA en ese orden. Fotografía y PDF siguen utilizando OCR convencional. La cuarta opción conserva un borrador local de texto o dictado del teclado y un adjunto temporal; abrirla no llama a OpenAI. Solo el botón «Interpretar con GO IA», con consentimiento específico sin marcar previamente, podría enviar ese contenido mínimo. Las entradas devueltas irían al mismo revisor y al mismo `go_import_catalog_services` que las otras opciones.
+
+La API anuncia `goAi: false`. `POST /api/supabase/manage/businesses/:businessId/catalog-import/ai/interpret` comprueba sesión, titularidad y verificación empresarial y devuelve `503 CATALOG_AI_UNAVAILABLE`, sin invocar modelos ni guardar archivos. La conversación central actual de GO IA está restringida a ADMIN y no constituye un intérprete autorizado para empresas. No hay consumo de tokens ni registro de consumo de IA por esta opción.
+
+Para activarla queda pendiente implementar, en la API existente, interpretación empresarial con límite de presupuesto y uso por cuenta, control de privacidad previo a OpenAI, validación estricta de respuesta y métricas visibles solo a ADMIN. Entonces se podrá anunciar `goAi: true`; no se debe habilitar desde el cliente por sí solo. No hacen falta tablas de catálogo nuevas: la revisión y confirmación existentes siguen siendo la única ruta de escritura en Supabase.
