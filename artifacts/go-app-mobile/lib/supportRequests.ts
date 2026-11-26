@@ -1,6 +1,6 @@
 export type SupportKind = "incident" | "improvement" | "help";
-/** The mobile circuit stays read-only until the real schema, API and identity path are verified. */
-export const GO_SUPPORT_LIVE_ENABLED = false;
+/** The hosted schema and authenticated API are installed; failures still surface from the server. */
+export const GO_SUPPORT_LIVE_ENABLED = true;
 export const newSupportRequestKey=()=>globalThis.crypto?.randomUUID?.()??"xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,c=>{
   const value=Math.floor(Math.random()*16);return (c==="x"?value:(value&3)|8).toString(16);
 });

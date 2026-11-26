@@ -1,4 +1,31 @@
-# GO AYUDA: activación pendiente
+# GO AYUDA: activación alojada y validación pendiente
+
+## Estado del 26 de noviembre de 2026
+
+La migración `go_support_v1` quedó aplicada en Supabase `xiyxziyjpgnqfecbhmqn`
+con versión `20261126092159`. Su copia versionada está en
+`../migrations/20261126092159_go_support_v1.sql` y conserva SHA-256
+`FE7413B64EC58FB86EC62A6AC88A42704529DC9A4A27D7F05364D065D7DD2961`
+(contenido LF). El preflight anterior confirmó cero objetos de SOPORTE.
+Después se verificaron siete tablas con RLS, quince funciones con
+`search_path` vacío, `EXECUTE` denegado a `anon`, el bucket privado y tres
+políticas de Storage limitadas a ese bucket. No se alteraron políticas previas.
+
+En la base alojada se probó el hilo personal y empresarial con identidades
+existentes bajo rol SQL `authenticated`, una empresa sintética dentro de una
+transacción revertida, respuesta ADMIN, denegación cruzada y ocultación de
+notas internas. La reversión dejó cero expedientes, archivos y empresas de
+prueba. Esta prueba de permisos SQL **no equivale** a una petición con JWT real
+por Railway ni a carga y descarga de Storage. El proyecto tiene cuatro cuentas,
+una membresía ADMIN activa y ninguna empresa persistida; el recorrido alojado
+USUARIO/EMPRESA ↔ ADMIN con sesiones independientes y adjuntos sigue pendiente.
+
+El cliente se habilita mediante `GO_SUPPORT_LIVE_ENABLED` en el commit de
+activación. Los fallos de API conservan los borradores; no se muestra recepción
+sin respuesta confirmada. El ejecutor periódico de retención sigue sin
+programación ni identidad de servicio y no se anuncia borrado automático.
+
+Las secciones siguientes conservan la revisión histórica anterior a la activación.
 
 ## Revalidación y entrega del 9 de noviembre de 2026
 
