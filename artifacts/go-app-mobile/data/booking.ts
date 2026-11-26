@@ -1645,7 +1645,9 @@ function deduplicateBookings<T extends { staffId?: string; startDatetime: string
 }
 
 /** The database is the sole live availability authority. Never fall back to a local grid. */
-export async function getTimelineAvailability(businessId: string, serviceIds: string[], dateISO: string, staffId?: string, options: { days?: number; datesOnly?: boolean; visualStepMinutes?: number; registeredSourceId?:string; partySize?: number } = {}): Promise<{ slots: SlotWithStatus[]; availableDates: string[]; timezone: string }> {
+export async function getTimelineAvailability(businessId: string, serviceIds: string[], dateISO: string, staffId?: string, options: { days?: number; datesOnly?: boolean; visualStepMinutes?: number; registeredSourceId?:string; partySize?: number; changeBookingId?:string } = {}): Promise<{ slots: SlotWithStatus[]; availableDates: string[]; timezone: string }> {
+  if (options.changeBookingId !== undefined && !isRemoteBookingId(options.changeBookingId))
+    throw new BookingApiError("No se pudo identificar la reserva original para comprobar su horario.", 400, "BOOKING_CHANGE_ORIGINAL_REQUIRED");
   const query = new URLSearchParams({ business_id: businessId, service_ids: serviceIds.join(","), dateISO });
   // The server still evaluates every minute and retains each exact free boundary.
   // Sampling only the response avoids shipping hundreds of duplicate plan bodies.
@@ -1654,6 +1656,7 @@ export async function getTimelineAvailability(businessId: string, serviceIds: st
   query.set("phase_policy_version","1");
   if (staffId) query.set("staff_id", staffId);
   if (options.partySize !== undefined) query.set("party_size", String(options.partySize));
+  if (options.changeBookingId) query.set("change_booking_id",options.changeBookingId);
   if (options.days) query.set("days", String(options.days));
   if (options.datesOnly) query.set("datesOnly", "true");
   const result = await supabaseApiRequest<{ version: number; gapPolicyVersion?:number; phasePolicyVersion?:number; slots: BookingTimeline[]; availableDates: string[]; timezone: string }>(`/supabase/booking-availability?${query}`, options.registeredSourceId ? {headers:{"x-go-booking-source":options.registeredSourceId}} : {}, true);
@@ -2933,7 +2936,6 @@ export function subscribeBookingUpdates(listener:()=>void){bookingUpdateListener
 export function notifyBookingUpdated(){for(const listener of bookingUpdateListeners)listener();}
 /** No local-success fallback: real negotiation requires an authenticated server transaction. */
 export async function changeBookingRequest(id:string,operation:"propose"|"accept"|"reject"|"cancel"|"confirm",input:BookingChangeInput,expectedUserId:string):Promise<Booking>{
- if(input.selection)throw new BookingApiError("El servidor actual solo permite proponer fecha y hora. No puede guardar todavía cambios de servicios, profesional o precio. La reserva original se conserva.",501,"BOOKING_CHANGE_SELECTION_UNSUPPORTED");
  if(!isRemoteBookingId(id))throw new BookingApiError("Esta reserva necesita su repositorio original.",400);
  try{
   if(!["cancel","reject"].includes(operation)){await requireRemoteGapPolicy(expectedUserId);await requireRemotePhasePolicy(expectedUserId);}

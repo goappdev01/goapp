@@ -485,7 +485,7 @@ for (const [width,height] of [[320,568],[375,667],[390,844],[430,932]]) test(`co
 // Execute the shared production selector with authoritative HTTP responses, without writes.
 const changeApi = loadPure("data/bookingChangeAvailability.ts");
 function savedChangeSelection() {
- const plan=planFor();return changeApi.bookingChangeSelection({businessId:business,serviceId:firstService,staffId:firstStaff,
+ const plan=planFor();return changeApi.bookingChangeSelection({reservationId:bookingId,businessId:business,serviceId:firstService,staffId:firstStaff,
  bookingTimeline:plan,bookingServices:plan.serviceDetails,contactName:"Peluquería primera",professionalName:"Ana",
  bookingCategory:"peluqueria",intentLabel:"Corte exacto",startDatetime:plan.startsAt,endDatetime:plan.endsAt});
 }
@@ -609,15 +609,18 @@ test("registered local aliases preserve the already-loaded remote timing/resourc
  assert.equal(changeApi.bookingChangeSlots(selection,[{...slot,timingSnapshot:changed}]).length,0);
 });
 
-test("remote adapter rejects changed services/professional explicitly before any request, rather than dropping them",async()=>{
- const f=fixture("overlay");await assert.rejects(f.api.changeBookingRequest(bookingId,"propose",{dateISO:today,time:"02:37",selection:{serviceIds:[secondService],staffId:secondStaff,durationMinutes:27,catalogSnapshot:{}}},user),error=>error.code==="BOOKING_CHANGE_SELECTION_UNSUPPORTED");
- assert.equal(f.calls.length,0);assert.equal(f.writes.length,0);
+test("remote adapter sends changed services and professional to the authorized negotiation endpoint",async()=>{
+ const f=fixture("overlay"),selection={serviceIds:[secondService],staffId:secondStaff,durationMinutes:27,catalogSnapshot:{rootIds:[secondService]}};
+ f.state.changeReply={id:bookingId,business_id:business,service_id:secondService,customer_id:user,starts_at:planFor().startsAt,ends_at:planFor().endsAt,status:"CONFIRMED"};
+ await f.api.changeBookingRequest(bookingId,"propose",{dateISO:today,time:"02:37",selection},user);
+ const call=f.calls.find(row=>row.url.pathname.endsWith("/change"));assert.deepEqual(call.body.selection,selection);
+ assert.equal(f.writes.length,0);
 });
 
-test("an incomplete original record still opens the actual catalogue without guessed services or times",async()=>{
+test("an incomplete original record opens the catalogue but cannot claim availability without a booking ID",async()=>{
  const original={businessId:business,contactName:"Peluquería primera",bookingCategory:"peluqueria"},before=JSON.stringify(original),selection=changeApi.bookingChangeSelection(original);
  const f=fixture("overlay",{changeSelection:selection});await f.start();assert.ok(button(f.tree(),"Corte exacto"));assert.ok(button(f.tree(),"save").props.disabled);assert.match(text(f.tree()),/precargar/);
- await f.press("Corte exacto");await f.press("save");await f.press("Ana");assert.ok(button(f.tree(),"02:37"));assert.equal(JSON.stringify(original),before);assert.equal(posted(f).length,0);
+ await f.press("Corte exacto");await f.press("save");await f.press("Ana");assert.equal(button(f.tree(),"02:37"),undefined);assert.match(text(f.tree()),/No se pudo consultar la disponibilidad/);assert.equal(JSON.stringify(original),before);assert.equal(posted(f).length,0);
 });
 
 

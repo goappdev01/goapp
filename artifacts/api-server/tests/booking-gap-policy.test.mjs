@@ -77,8 +77,25 @@ test('negotiation requires gap authority for all time-changing decisions, while 
  for(const operation of ['propose','counter','accept','confirm','cancel','reject']){
   const f=fixture(0),res=f.response();await f.route('bookingNegotiation','post','/bookings/:bookingId/change')(f.request({operation,expectedRevision:0,dateISO:'2035-01-08',time:'10:00'}),res);
   const cancel=['cancel','reject'].includes(operation);assert.equal(res.statusCode,cancel?200:503);
-  assert.equal(f.calls.some(c=>c.url.endsWith('go_negotiate_booking')),cancel);
+  assert.equal(f.calls.some(c=>c.url.endsWith('go_negotiate_booking_selection')),cancel);
  }
+});
+test('change availability forwards only the booking ID, selection and caller JWT to the scoped RPC',async()=>{
+ const f=fixture(),req=f.request();req.query={business_id:id,service_ids:id,dateISO:'2035-01-08',change_booking_id:id,party_size:'4'};
+ const res=f.response();await f.route('bookingTimeline','get','/booking-availability')(req,res);
+ assert.equal(res.statusCode,200);const call=f.calls.at(-1);
+ assert.match(call.url,/go_booking_change_availability$/);assert.equal(call.init.headers.Authorization,'Bearer isolated-caller');
+ assert.deepEqual(JSON.parse(call.init.body),{p_booking_id:id,p_service_ids:[id],p_staff_id:null,p_date_iso:'2035-01-08',p_days:1,p_dates_only:false,p_step_minutes:1});
+ const bad=f.request();bad.query={...req.query,change_booking_id:'foreign-local-id'};const denied=f.response();
+ await f.route('bookingTimeline','get','/booking-availability')(bad,denied);assert.equal(denied.statusCode,400);
+});
+test('changed selection reaches the negotiation RPC without a client-chosen exclusion',async()=>{
+ const f=fixture(),selection={serviceIds:[id],staffId:null,durationMinutes:30,catalogSnapshot:{rootIds:[id],selectedAssociationIds:[]}};
+ const req=f.request({operation:'propose',expectedRevision:0,dateISO:'2035-01-08',time:'10:00',selection,acceptFinancialTerms:true});
+ const res=f.response();await f.route('bookingNegotiation','post','/bookings/:bookingId/change')(req,res);
+ assert.equal(res.statusCode,200);const call=f.calls.at(-1),body=JSON.parse(call.init.body);
+ assert.match(call.url,/go_negotiate_booking_selection$/);assert.deepEqual(body.p_selection,selection);
+ assert.equal('p_exclude' in body,false);assert.equal(body.p_booking_id,id);
 });
 test('existing management validator accepts only explicit boolean/whole-minute authorizations and discards spoofed audit identity',()=>{
  const text=readFileSync('src/routes/management.ts','utf8'),ast=ts.createSourceFile('management.ts',text,ts.ScriptTarget.Latest,true);
@@ -101,7 +118,7 @@ test('new phase policy is required before writes; cancellation and rejection sti
   const f=fixture();f.state.phaseVersion=phaseVersion;const res=f.response();
   assert.equal(await f.policy.requireBookingGapPolicy(f.request(),res),false);assert.equal(res.statusCode,503);assert.equal(res.value.code,'BOOKING_PHASE_POLICY_UNAVAILABLE');assert.equal(f.calls.length,2);
  }
- for(const operation of ['cancel','reject']){const f=fixture(),res=f.response();f.state.phaseVersion=0;await f.route('bookingNegotiation','post','/bookings/:bookingId/change')(f.request({operation,expectedRevision:0}),res);assert.equal(res.statusCode,200);assert.equal(f.calls.length,1);assert.match(f.calls[0].url,/go_negotiate_booking$/);}
+ for(const operation of ['cancel','reject']){const f=fixture(),res=f.response();f.state.phaseVersion=0;await f.route('bookingNegotiation','post','/bookings/:bookingId/change')(f.request({operation,expectedRevision:0}),res);assert.equal(res.statusCode,200);assert.equal(f.calls.length,1);assert.match(f.calls[0].url,/go_negotiate_booking_selection$/);}
 });
 test('professional capacity route authenticates, forwards only validated IDs and preserves SQL authorization denial',async()=>{
  const f=fixture(),req=f.request();req.query={business_id:id,staff_id:id,dateISO:'2035-01-08'};const res=f.response();

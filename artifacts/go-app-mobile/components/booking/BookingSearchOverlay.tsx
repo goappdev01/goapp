@@ -688,10 +688,10 @@ export function BookingSearchOverlay({
       selectedDate,
       staffId,
       selectedServices.map(service => service.id),
-    ) : restaurantBooking
+    ) : changeSelection
+      ? (await getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), selectedDate, staffId, { changeBookingId:changeSelection.bookingId, ...(restaurantBooking?{partySize}:{}) })).slots
+      : restaurantBooking
       ? (await getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), selectedDate, staffId, { partySize })).slots
-      : changeSelection
-      ? (await getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), selectedDate, staffId)).slots
       : await getAllSlots(selectedBusiness.id, selectedItem.id, selectedDate, staffId, selectedServices.map(service => service.id));
     if (generation !== slotGeneration.current || scope !== currentSlotScope.current) return;
     console.log("[loadSlots] slots totales →", raw.length,
@@ -722,7 +722,7 @@ export function BookingSearchOverlay({
     if (!visible || demoRepository && !demoRepository.getAvailableDates || step !== "slots" || !selectedBusiness || !selectedItem) return;
     const staffId = selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined;
     if (restaurantBooking && !validPartySize) return;
-    void (demoRepository?.getAvailableDates ? demoRepository.getAvailableDates(selectedBusiness.id, selectedServices.map(service => service.id), availabilityDays[0], staffId, availabilityDays.length).then(availableDates=>({availableDates})) : getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), availabilityDays[0], staffId, { days: availabilityDays.length, datesOnly: true, ...(restaurantBooking ? { partySize } : {}) }))
+    void (demoRepository?.getAvailableDates ? demoRepository.getAvailableDates(selectedBusiness.id, selectedServices.map(service => service.id), availabilityDays[0], staffId, availabilityDays.length).then(availableDates=>({availableDates})) : getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), availabilityDays[0], staffId, { days: availabilityDays.length, datesOnly: true, ...(restaurantBooking ? { partySize } : {}), ...(changeSelection?{changeBookingId:changeSelection.bookingId}:{}) }))
       .then(result => { if (current) setAvailableDates(result.availableDates); })
       .catch(error => { if (current) { setAvailableDates([]); setSlotError(error instanceof Error ? error.message : "No se pudieron consultar las fechas."); } });
     return () => { current = false; };
@@ -811,7 +811,7 @@ export function BookingSearchOverlay({
         const staffId=selectedStaff && selectedStaff!=="none"?selectedStaff.id:slot.staffId;
         const fresh=demoRepository
           ? await demoRepository.getAllSlots(selectedBusiness.id,selectedItem.id,selectedDate,staffId,selectedServices.map(service=>service.id))
-          : (await getTimelineAvailability(selectedBusiness.id,selectedServices.map(service=>service.id),selectedDate,staffId,restaurantBooking?{partySize}:{})).slots;
+          : (await getTimelineAvailability(selectedBusiness.id,selectedServices.map(service=>service.id),selectedDate,staffId,{...(restaurantBooking?{partySize}:{}),changeBookingId:changeSelection.bookingId})).slots;
         if(scope!==currentSlotScope.current)return;
         setSlots(fresh);
         const selected=fresh.find(candidate=>candidate.isAvailable&&!candidate.isBlocked
@@ -888,7 +888,7 @@ export function BookingSearchOverlay({
         const staffId=proposalReview.selection.staffId;
         const fresh=demoRepository
           ? await demoRepository.getAllSlots(selectedBusiness.id,selectedItem.id,selectedDate,staffId,selectedServices.map(service=>service.id))
-          : (await getTimelineAvailability(selectedBusiness.id,selectedServices.map(service=>service.id),selectedDate,staffId,restaurantBooking?{partySize}:{})).slots;
+          : (await getTimelineAvailability(selectedBusiness.id,selectedServices.map(service=>service.id),selectedDate,staffId,{...(restaurantBooking?{partySize}:{}),changeBookingId:changeSelection.bookingId})).slots;
         if(scope!==currentSlotScope.current)return;
         const slot=proposalReview.slot;
         if(!fresh.some(candidate=>candidate.isAvailable&&!candidate.isBlocked

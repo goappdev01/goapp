@@ -6,7 +6,7 @@ import { bearerHeader, supabaseRequest } from "../lib/supabase";
 const router: IRouter = Router();
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const operations = new Set(["propose", "counter", "accept", "reject", "cancel", "confirm"]);
-const fields = new Set(["operation", "requestId", "expectedRevision", "proposalId", "dateISO", "date", "time", "startsAt", "acceptFinancialTerms"]);
+const fields = new Set(["operation", "requestId", "expectedRevision", "proposalId", "dateISO", "date", "time", "startsAt", "acceptFinancialTerms", "selection"]);
 type RpcError = { code?: string; message?: string };
 const messages: Record<string, string> = {
   BOOKING_CONFLICT: "El horario ya no está disponible. La reserva original se conserva.",
@@ -25,6 +25,9 @@ const messages: Record<string, string> = {
   BOOKING_INVALID_INTERVAL: "Selecciona un horario futuro con la duración original.",
   BOOKING_NONEXISTENT_LOCAL_TIME: "Esa hora no existe por el cambio de horario. Selecciona otra.",
   BOOKING_AMBIGUOUS_LOCAL_TIME: "Esa hora se repite por el cambio de horario. Selecciona una hora inequívoca.",
+  BOOKING_CATALOG_CHANGED: "El catálogo o sus precios han cambiado. Revisa la propuesta antes de enviarla.",
+  BOOKING_PLAN_CHANGED: "La duración o los recursos han cambiado. Revisa los horarios disponibles.",
+  BOOKING_SELECTION_REQUIRES_V2: "Esta propuesta requiere el motor actualizado de selección de servicios.",
 };
 
 async function relay(response: globalThis.Response, res: Response, communication = false) {
@@ -59,6 +62,17 @@ router.post("/bookings/:bookingId/change", async (req: Request, res: Response) =
     res.status(400).json({ code: "BOOKING_INVALID_COMMAND", error: "Invalid booking decision or revision" }); return;
   }
   const proposing = input.operation === "propose" || input.operation === "counter";
+  const selection = input.selection;
+  if(selection !== undefined && (!proposing || !selection || typeof selection !== "object" || Array.isArray(selection)
+    || Object.keys(selection).some(key => !["serviceIds","staffId","professionalName","durationMinutes","catalogSnapshot"].includes(key))
+    || !Array.isArray(selection.serviceIds) || !selection.serviceIds.length || selection.serviceIds.length > 32
+    || selection.serviceIds.some((value:unknown)=>typeof value!=="string"||!uuid.test(value))
+    || selection.staffId != null && (typeof selection.staffId!=="string"||!uuid.test(selection.staffId))
+    || !Number.isSafeInteger(selection.durationMinutes) || selection.durationMinutes<1 || selection.durationMinutes>10080
+    || !selection.catalogSnapshot || typeof selection.catalogSnapshot!=="object" || Array.isArray(selection.catalogSnapshot)
+    || JSON.stringify(selection).length>40000)){
+    res.status(400).json({code:"BOOKING_INVALID_COMMAND",error:"Selección de reserva inválida."});return;
+  }
   if (proposing && (typeof input.dateISO !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input.dateISO)
     || typeof input.time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(input.time))
     || input.startsAt != null && (typeof input.startsAt !== "string" || !/(Z|[+-]\d{2}:\d{2})$/.test(input.startsAt) || !Number.isFinite(Date.parse(input.startsAt)))) {
@@ -68,18 +82,19 @@ router.post("/bookings/:bookingId/change", async (req: Request, res: Response) =
   // It is NOT an authentication credential. The journal is also scoped by auth.uid().
   const digest = createHash("sha256").update(JSON.stringify([id, input.operation, input.expectedRevision,
     input.proposalId ?? null, proposing ? input.dateISO : null, proposing ? input.time : null,
-    proposing ? input.startsAt ?? null : null, input.acceptFinancialTerms === true])).digest("hex");
+    proposing ? input.startsAt ?? null : null, input.acceptFinancialTerms === true,proposing ? selection??null : null])).digest("hex");
   const requestId = input.requestId ?? digest.slice(0,8)+"-"+digest.slice(8,12)+"-5"+digest.slice(13,16)+"-8"+digest.slice(17,20)+"-"+digest.slice(20,32);
   // Caller JWT is passed through unchanged. The database is the authority for
   // identity, ownership, revision, timing, conflict checks and the transaction.
   try {
     if(!["cancel","reject"].includes(input.operation) && !await requireBookingGapPolicy(req,res))return;
-    const response = await supabaseRequest("/rest/v1/rpc/go_negotiate_booking", {
+    const response = await supabaseRequest("/rest/v1/rpc/go_negotiate_booking_selection", {
       method: "POST", headers: { ...auth, "Content-Type": "application/json" },
       body: JSON.stringify({ p_booking_id: id, p_operation: input.operation, p_request_id: requestId,
         p_expected_revision: input.expectedRevision, p_proposal_id: input.proposalId ?? null,
         p_date_iso: proposing ? input.dateISO : null, p_time: proposing ? input.time : null,
-        p_starts_at: proposing ? input.startsAt ?? null : null, p_financial_consent: input.acceptFinancialTerms === true }),
+        p_starts_at: proposing ? input.startsAt ?? null : null, p_financial_consent: input.acceptFinancialTerms === true,
+        p_selection: proposing ? selection??null : null }),
     });
     await relay(response, res);
   } catch { res.status(503).json({ code: "BOOKING_OPERATION_UNAVAILABLE", error: "No se pudo comprobar el resultado. Actualiza o reintenta con el mismo identificador." }); }

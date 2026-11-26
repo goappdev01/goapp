@@ -5,6 +5,7 @@ import type { BookingTimeline } from "./bookingTimeline";
 
 /** Labels/scope from the existing reservation; never an authorization or availability source. */
 export type BookingChangeSelection = {
+  bookingId: string;
   business: Business; item: BookableItem; services: BookingService[]; staff?: Staff;
   peopleCount?: number;
   durationMinutes: number; timeline?: BookingTimeline;
@@ -46,6 +47,7 @@ export function bookingChangeSelection(entry: GoEntry, original?: Partial<Bookin
     ?? { id, title: entry.intentLabel || "Reserva", durationMinutes: minutes, price: 0 });
   const staffId = entry.staffId ?? entry.professionalId ?? original?.staffId ?? timeline?.staffId ?? undefined;
   return {
+    bookingId: String(entry.reservationId ?? entry.bookingId ?? original?.id ?? ""),
     business: { id: entry.businessId, name: entry.contactName || "", location: entry.place || "", phone: "",
       category: entry.bookingCategory || "peluqueria", bookingActive: true, bookingColor: entry.color || "#4A80BD",
       timezone: timeline?.timezone || "", createdAt: "" },

@@ -50,16 +50,24 @@ router.get("/booking-availability", async (req, res) => {
   const days = query.days == null ? 1 : Number(query.days);
   const step = query.step_minutes == null ? 1 : Number(query.step_minutes);
   const partySize = query.party_size == null ? undefined : Number(query.party_size);
+  const changeBookingId = query.change_booking_id;
   if(query.gap_policy_version!=null && String(query.gap_policy_version)!=="1"){res.status(400).json({code:"BOOKING_INVALID_GAP_POLICY"});return;}
   if(query.phase_policy_version!=null && String(query.phase_policy_version)!=="1"){res.status(400).json({code:"BOOKING_INVALID_PHASE_POLICY"});return;}
   const local = typeof query.dateISO === "string" && /^\d{4}-\d{2}-\d{2}$/.test(query.dateISO);
   if (!id(query.business_id) || !serviceIds(selected) || query.staff_id != null && !id(query.staff_id)
+    || changeBookingId != null && (!id(changeBookingId) || !local)
     || !Number.isInteger(days) || days < 1 || days > 31 || !Number.isInteger(step) || step < 1 || step > 60
     || partySize !== undefined && (!Number.isInteger(partySize) || partySize < 1 || partySize > 40)
     || query.datesOnly != null && !["true", "false", "1", "0"].includes(String(query.datesOnly))
     || !local && (!instant(query.from) || !instant(query.to))
     || local && (query.from != null || query.to != null)) {
     res.status(400).json({ code: "BOOKING_INVALID_RANGE", error: "Selecciona servicios y un intervalo con minutos exactos." }); return;
+  }
+  if(changeBookingId){
+    await rpc(req,res,"go_booking_change_availability",{p_booking_id:changeBookingId,p_service_ids:selected,
+      p_staff_id:query.staff_id??null,p_date_iso:query.dateISO,p_days:days,
+      p_dates_only:query.datesOnly==="true"||query.datesOnly==="1",p_step_minutes:step});
+    return;
   }
   await rpc(req, res, partySize === undefined ? "go_booking_availability" : "go_restaurant_availability", {
     p_business_id: query.business_id, p_service_ids: selected, p_staff_id: query.staff_id ?? null,
