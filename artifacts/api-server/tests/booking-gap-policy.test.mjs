@@ -16,6 +16,7 @@ function fixture(version=1){
   calls.push({url,init});
   if(url.endsWith('go_booking_gap_policy_version')){if(state.outage)throw new Error('Offline');return Response.json(state.version);}
   if(url.endsWith('go_booking_phase_policy_version'))return Response.json(state.phaseVersion);
+  if(url.endsWith('go_negotiate_booking_selection')&&state.negotiationIssue)return Response.json(state.negotiationIssue,{status:409});
   return Response.json({ok:true});
  }};
  function load(file,imports={}){
@@ -96,6 +97,15 @@ test('changed selection reaches the negotiation RPC without a client-chosen excl
  assert.equal(res.statusCode,200);const call=f.calls.at(-1),body=JSON.parse(call.init.body);
  assert.match(call.url,/go_negotiate_booking_selection$/);assert.deepEqual(body.p_selection,selection);
  assert.equal('p_exclude' in body,false);assert.equal(body.p_booking_id,id);
+});
+test('a changed selection reports real resource and restaurant capacity conflicts without losing the original',async()=>{
+ for(const issue of [{code:'23P01',message:'BOOKING_RESOURCE_CONFLICT'},
+  {code:'PT409',message:'RESTAURANT_CAPACITY_UNAVAILABLE'}]){
+  const f=fixture(),res=f.response();f.state.negotiationIssue=issue;
+  await f.route('bookingNegotiation','post','/bookings/:bookingId/change')(f.request({operation:'accept',expectedRevision:1,proposalId:id,acceptFinancialTerms:true}),res);
+  assert.equal(res.statusCode,409);assert.equal(res.value.code,issue.message);
+  assert.match(res.value.error,/reserva original se conserva/);
+ }
 });
 test('existing management validator accepts only explicit boolean/whole-minute authorizations and discards spoofed audit identity',()=>{
  const text=readFileSync('src/routes/management.ts','utf8'),ast=ts.createSourceFile('management.ts',text,ts.ScriptTarget.Latest,true);

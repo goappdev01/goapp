@@ -10,6 +10,9 @@ const fields = new Set(["operation", "requestId", "expectedRevision", "proposalI
 type RpcError = { code?: string; message?: string };
 const messages: Record<string, string> = {
   BOOKING_CONFLICT: "El horario ya no está disponible. La reserva original se conserva.",
+  BOOKING_RESOURCE_CONFLICT: "El recurso necesario ya está ocupado. Elige otra franja; la reserva original se conserva.",
+  BOOKING_RESOURCE_UNAVAILABLE: "El recurso necesario no está disponible en esa franja. Elige otra; la reserva original se conserva.",
+  RESTAURANT_CAPACITY_UNAVAILABLE: "No hay mesa o aforo suficiente en esa franja. Elige otra; la reserva original se conserva.",
   BOOKING_REVISION_CONFLICT: "La reserva ha cambiado. Actualiza antes de decidir.",
   BOOKING_PROPOSAL_CHANGED: "La propuesta ha cambiado. Actualiza antes de decidir.",
   BOOKING_REQUEST_REUSED: "Este identificador ya corresponde a otra operación.",
@@ -42,7 +45,8 @@ async function relay(response: globalThis.Response, res: Response, communication
   const status = issue.code === "23P01" || issue.code === "23505" || issue.code === "40P01" || issue.code === "40001" ? 409
     : /^PT(400|403|404|409|422)$/.test(issue.code ?? "") ? Number(issue.code!.slice(2))
     : issue.code === "42501" ? 403 : issue.code === "22023" ? 400 : response.status >= 500 ? 503 : response.status;
-  const code = issue.code === "23P01" ? "BOOKING_CONFLICT" : messages[issue.message ?? ""] ? issue.message! : status === 404 ? "BOOKING_NOT_FOUND" : "BOOKING_OPERATION_FAILED";
+  const code = issue.code === "23P01" ? issue.message === "BOOKING_RESOURCE_CONFLICT" ? "BOOKING_RESOURCE_CONFLICT" : "BOOKING_CONFLICT"
+    : messages[issue.message ?? ""] ? issue.message! : status === 404 ? "BOOKING_NOT_FOUND" : "BOOKING_OPERATION_FAILED";
   res.status(status).json({ code, error: messages[code] ?? (status === 404 ? "Reserva no disponible." : "No se pudo completar la operación. Actualiza la reserva antes de volver a intentarlo.") });
 }
 
