@@ -86,17 +86,18 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
   const [pressed,setPressed]=useState<string|null>(null);
   const list = layout === "list";
   const label=(es:string,en:string)=>lang==="en"?en:es;
+  const discardLabel=(personal||entryIsReservation(entry))?label("OCULTAR","HIDE"):label("ELIMINAR","DELETE");
   const selected=(key:string)=>key==="pending"?entry.localResolutionStatus==="pending":entry.localResolutionStatus==="done";
   const actions=[
-    {key:"discard",text:label("ELIMINAR","DELETE"),tone:"negative" as const,run:onDiscard},
+    {key:"discard",text:discardLabel,tone:"negative" as const,run:onDiscard},
     {key:"pending",text:label("PENDIENTE","PENDING"),tone:"pending" as const,run:onPending},
     {key:"done",text:label("REALIZADA","DONE"),tone:"positive" as const,run:onDone},
   ].filter(action=>action.run && (layout!=="detail" || action.key!=="discard"));
   if(!actions.length)return null;
   if(list){
     const listActions:GoListAction[]=[];
-    if(onDiscard)listActions.push({key:"discard",label:label("ELIMINAR","DELETE"),tone:"negative",onPress:onDiscard,disabled,
-      accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("ELIMINAR","DELETE"):label("ELIMINAR","DELETE"),
+    if(onDiscard)listActions.push({key:"discard",label:discardLabel,tone:"negative",onPress:onDiscard,disabled,
+      accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+discardLabel:discardLabel,
       accessibilityHint:label("Oculta solo tu ficha. No cancela el compromiso.","Hides only your card. Does not cancel the commitment.")});
     if(onPending)listActions.push({key:"pending",label:label("PENDIENTE","PENDING"),tone:"pending",onPress:onPending,disabled,selectable:!!onDone,selected:selected("pending"),
       accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("PENDIENTE","PENDING"):label("PENDIENTE","PENDING")});

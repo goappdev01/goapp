@@ -365,7 +365,7 @@ test('three open microactions match Listados order in both hands without changin
     const calls=[];
     const tree=f.render(GoEntryMicroActions,{entry:base,handedness,onDone:()=>calls.push('done'),onPending:()=>calls.push('pending'),onDiscard:()=>calls.push('cancel')});
     const buttons=nodes(tree,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);let stopped=0;
-    assert.deepEqual(buttons.map(b=>b.props.accessibilityLabel.replace('Mi seguimiento: ','')),handedness==='right'?['ELIMINAR','PENDIENTE','REALIZADA']:['REALIZADA','PENDIENTE','ELIMINAR']);
+    assert.deepEqual(buttons.map(b=>b.props.accessibilityLabel.replace('Mi seguimiento: ','')),handedness==='right'?['OCULTAR','PENDIENTE','REALIZADA']:['REALIZADA','PENDIENTE','OCULTAR']);
     buttons.forEach(b=>{assert.equal(b.props.style.minHeight+b.props.hitSlop.top+b.props.hitSlop.bottom,44);assert.equal(b.props.hitSlop.left,0);assert.ok(nodes(b,n=>n.type==='Text').length);assert.equal(nodes(b,n=>n.type==='Feather').length,0);assert.equal(nodes(b,n=>n.type==='Text')[0].props.style.color,'#FFFFFF');b.props.onPress({stopPropagation(){stopped++;}});});
     assert.deepEqual(calls,handedness==='right'?['cancel','pending','done']:['done','pending','cancel']);assert.equal(stopped,3);
   }
@@ -373,9 +373,9 @@ test('three open microactions match Listados order in both hands without changin
   const denied=f.render(GoEntryMicroActions,{entry:base,onDiscard(){}});assert.equal(nodes(denied,n=>n.type==='TouchableOpacity').length,1);
 });
 
-test('personal ELIMINAR and booking CANCELAR remain distinct destructive actions',()=>{
+test('personal OCULTAR and booking CANCELAR remain distinct destructive actions',()=>{
  const f=fixture(),c=f.load('components/GoEntryDetails.tsx'),calls=[];
- const personal=f.render(c.GoEntryMicroActions,{entry:base,onDiscard:()=>calls.push('hide-personal-card')}),discard=nodes(personal,n=>n.props.accessibilityLabel==='Mi seguimiento: ELIMINAR')[0];assert.ok(discard);assert.match(discard.props.accessibilityHint,/No cancela el compromiso/);
+ const personal=f.render(c.GoEntryMicroActions,{entry:base,onDiscard:()=>calls.push('hide-personal-card')}),discard=nodes(personal,n=>n.props.accessibilityLabel==='Mi seguimiento: OCULTAR')[0];assert.ok(discard);assert.match(discard.props.accessibilityHint,/No cancela el compromiso/);
  const reservation=f.render(c.GoEntryQuickActions,{entry:base,onCancel:()=>calls.push('cancel-reservation')});nodes(reservation,n=>n.props.accessibilityLabel==='CANCELAR')[0].props.onPress({stopPropagation(){}});discard.props.onPress({stopPropagation(){}});
  assert.deepEqual(calls,['cancel-reservation','hide-personal-card']);
 });
@@ -442,3 +442,15 @@ test('cancelled Calendar detail keeps the eye-off personal action while follow-u
 });
 
 test('Deleted detail reuses its bottom control as personal retirement without changing the normal eye-off action',()=>{let retired=0;const entry={...base,deleted:true,bookingStatus:'cancelada'},before=JSON.stringify(entry),f=sheet(entry,{discardFromTrash:true,onDiscard:()=>retired++});const button=nodes(f.tree,n=>n.props.testID==='entry-discard')[0];assert.equal(button.props.accessibilityLabel,'Retirar de Eliminadas');assert.equal(nodes(button,n=>n.type==='Feather')[0].props.name,'trash-2');button.props.onPress({stopPropagation(){}});assert.equal(retired,1);assert.equal(JSON.stringify(entry),before);const normal=sheet(base,{onDiscard(){}});assert.equal(nodes(nodes(normal.tree,n=>n.props.testID==='entry-discard')[0],n=>n.type==='Feather')[0].props.name,'eye-off');});
+
+
+test('reservation hide label is translated in inline and list actions while non-reservation delete labels are preserved',()=>{
+ for(const lang of ['es','en'])for(const layout of [undefined,'list']){
+  const f=fixture();f.setLanguage(lang);const c=f.load('components/GoEntryDetails.tsx'),calls=[];
+  const micro=f.render(c.GoEntryMicroActions,{entry:base,layout,onDiscard:()=>calls.push('hide')});const reservation=layout==='list'?f.render(c.GoListActionRow,micro.props):micro;
+  const hide=nodes(reservation,n=>n.type==='TouchableOpacity'&&n.props.accessibilityLabel?.includes(lang==='es'?'OCULTAR':'HIDE'))[0];assert.ok(hide);assert.match(texts(hide),lang==='es'?/OCULTAR/:/HIDE/);hide.props.onPress({stopPropagation(){}});assert.deepEqual(calls,['hide']);
+  const legacy=f.render(c.GoEntryMicroActions,{entry:{...base,reservationId:undefined,customerBooking:undefined,businessBooking:undefined,type:'GO_RESERVA'},onDiscard(){}});assert.match(texts(legacy),lang==='es'?/OCULTAR/:/HIDE/);
+  const task={...base,reservationId:undefined,customerBooking:undefined,businessBooking:undefined,type:'TASK'};
+  const taskMicro=f.render(c.GoEntryMicroActions,{entry:task,layout,onDiscard(){}}),other=layout==='list'?f.render(c.GoListActionRow,taskMicro.props):taskMicro;assert.match(texts(other),lang==='es'?/ELIMINAR/:/DELETE/);
+ }
+});
