@@ -24,7 +24,7 @@ test('native isolated PostgreSQL: two-way booking messages survive a server rest
  try{
   await command('initdb',['-D',data,'-U','postgres','-A','trust','--locale=C','-E','UTF8']);
   const start=()=>command('pg_ctl',['-D',data,'-l',path.join(dir,'postgres.log'),'-w','-o','-h 127.0.0.1 -p '+port,'start']);
-  await start();started=true;await sql(schema);await sql(await readFile('supabase/drafts/booking_messages_v1.sql','utf8'));
+  await start();started=true;await sql(schema);await sql(await readFile('supabase/migrations/20261126100941_go_booking_messages_v1.sql','utf8'));
   const before=await sql('select jsonb_agg(to_jsonb(b) order by id) from public.bookings b');
   await send(ids.customer,1,'Synthetic message A');await send(ids.owner,2,'Synthetic message B');
   assert.equal((await send(ids.customer,1,'Synthetic message A')).messages.length,2);

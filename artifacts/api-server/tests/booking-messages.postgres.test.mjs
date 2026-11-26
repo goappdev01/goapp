@@ -8,7 +8,7 @@ test('GO Communication uses one persisted reservation thread and existing partic
  const db=await catalogDatabase(),[owner,customer,other,secondOwner,business,otherBusiness,service,otherService,booking,otherBooking]=Array.from({length:10},()=>randomUUID());
  try{
   await db.query('begin');
-  const draft=await readFile('supabase/drafts/booking_messages_v1.sql','utf8');
+  const draft=await readFile('supabase/migrations/20261126100941_go_booking_messages_v1.sql','utf8');
   await db.query(draft.replace(/^begin;$/m,'').replace(/^commit;$/m,''));
   for(const [id,name]of [[owner,'Owner'],[customer,'Customer'],[other,'Unrelated customer'],[secondOwner,'Second owner']]){
    await db.query('insert into auth.users(id,email) values($1,$2)',[id,id+'@test.invalid']);

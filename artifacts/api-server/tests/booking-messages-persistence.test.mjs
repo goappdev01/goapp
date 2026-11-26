@@ -12,7 +12,7 @@ test('real Express and persisted isolated PostgreSQL: customer/company round tri
  // Auth/REST HTTP transport below is synthetic. No hosted identities or production connection are used.
  const dir=await mkdtemp(path.join(tmpdir(),'go-messages-persistence-'));
  let db=new PGlite(path.join(dir,'database'));await db.exec(schema);
- await db.exec(await readFile('supabase/drafts/booking_messages_v1.sql','utf8'));
+ await db.exec(await readFile('supabase/migrations/20261126100941_go_booking_messages_v1.sql','utf8'));
  await build({entryPoints:['src/routes/bookingNegotiation.ts'],outfile:path.join(dir,'router.mjs'),bundle:true,platform:'node',format:'esm',
   banner:{js:"import {createRequire} from 'node:module';const require=createRequire(import.meta.url);"}});
  const {default:router}=await import(pathToFileURL(path.join(dir,'router.mjs')));
