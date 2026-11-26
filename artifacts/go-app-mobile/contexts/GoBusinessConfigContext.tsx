@@ -71,6 +71,7 @@ const LEGACY_PLANTILLA_KEY  = "go_plantilla_items_v1";
 
 export type SavedService = {
   description?: string;
+  category?: string;
   /** Bundled example reference for any business; private data URI only in DEMO. */
   photoUri?: string;
   name:      string;
@@ -105,6 +106,8 @@ export type BusinessConfig = {
   openTo:           string;
   daySchedules:     Record<string, DaySchedule>;
   services:         SavedService[];
+  /** Only new hair-salon templates require an explicit catalogue review. */
+  hairCatalogReviewRequired?: boolean;
   paymentPolicy:    number;
   bookingDepositPercent?: number; // Only used when paymentPolicy === 2.
   approvalPolicy:   number;
@@ -232,9 +235,11 @@ export function GoBusinessPreviewProvider({ children }: { children: React.ReactN
       const changed = prev.subId !== subId;
       return { ...prev, sectorId, subId,
         plantillaItems: changed || prev.plantillaItems.length === 0 ? initPlantillaItems(subId) : prev.plantillaItems,
-        services: changed || prev.services.length === 0 ? (SUGGESTED_SERVICES[subId] ?? []).map(service => ({
+        services: changed ? (SUGGESTED_SERVICES[subId] ?? []).map(service => ({
           name: service.name, duration: service.duration, price: service.price,
+          category: service.category, capacity: service.capacity, photoUri: service.photoUri,
         })) : prev.services,
+        hairCatalogReviewRequired: changed ? subId === "peluqueria" : prev.hairCatalogReviewRequired,
       };
     }));
   }, [demo, report]);
@@ -383,7 +388,8 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
   const bookingResources = cfg.bookingResources === undefined ? undefined : validateBookingResources(cfg.bookingResources);
   const configuredServices = cfg.services.filter(service => service.name.trim());
   const services = serializeServiceConfiguration(cfg.services, { resources: bookingResources ?? [] })
-    .map((service, index) => ({ ...service, photoUri: configuredServices[index]?.photoUri }));
+    .map((service, index) => ({ ...service, category: configuredServices[index]?.category,
+      photoUri: configuredServices[index]?.photoUri }));
   // Validate before any remote write; an earlier closing time explicitly means next day.
   for (const day of cfg.activeDays) {
     const schedule = migrateDayScheduleEntry(cfg.daySchedules?.[String(day)] ?? { from: cfg.openFrom, to: cfg.openTo });
@@ -416,7 +422,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
         bookingColor: sectorColor,
         // Deactivate immediately; publish an activation only after the full
         // catalogue, staff and hours have synchronized successfully.
-        bookingActive: cfg.bookingEnabled === false ? false : existing.bookingActive,
+        bookingActive: cfg.bookingEnabled === false || cfg.hairCatalogReviewRequired ? false : existing.bookingActive,
         cancellationPolicy,
         phone:    cfg.phone    ?? existing.phone ?? "",
         whatsapp: cfg.whatsapp ?? existing.whatsapp,
@@ -425,7 +431,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
         bookingBlocks: cfg.bookingBlocks ?? existing.bookingBlocks,
       };
       await saveBusiness(updated);
-      if (cfg.bookingEnabled === true && !existing.bookingActive) activateAfterSync = updated;
+      if (cfg.bookingEnabled === true && !cfg.hairCatalogReviewRequired && !existing.bookingActive) activateAfterSync = updated;
     } else {
       throw new Error("El negocio configurado no pertenece a esta cuenta. Vuelve a cargar la configuración.");
     }
@@ -473,9 +479,11 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
       // reaches the booking compiler and the catalogue entry remains inactive.
       const catalogueTiming = pendingTiming ? undefined : svc.timing;
       const catalogueMetadata = { ...existing?.catalogMetadata };
+      if (svc.category !== undefined) catalogueMetadata.category = svc.category;
       if (pendingTiming) catalogueMetadata.timingConfigurationPending = true;
       else delete catalogueMetadata.timingConfigurationPending;
-      const metadataPatch = pendingTiming || existing?.catalogMetadata?.timingConfigurationPending ? {catalogMetadata: catalogueMetadata} : {};
+      const metadataPatch = pendingTiming || existing?.catalogMetadata?.timingConfigurationPending || svc.category !== undefined
+        ? {catalogMetadata: catalogueMetadata} : {};
       if (existing) {
         const changed =
           existing.active !== !pendingTiming ||
@@ -483,6 +491,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
           existing.durationMinutes  !== svc.duration          ||
           existing.price            !== svc.price             ||
           existing.customerCapacity !== (svc.capacity ?? 1) ||
+          (svc.category !== undefined && existing.catalogMetadata?.category !== svc.category) ||
           (svc.photoUri !== undefined && existing.photoUri !== svc.photoUri) ||
           JSON.stringify(existing.timing) !== JSON.stringify(catalogueTiming) || existing.description !== svc.description;
         if (changed) {
@@ -897,9 +906,10 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
           : prev.plantillaItems;
 
       const services =
-        subChanged || prev.services.length === 0
+        subChanged
           ? (SUGGESTED_SERVICES[subId] ?? []).map(s => ({
               name: s.name, duration: s.duration, price: s.price,
+              category: s.category, capacity: s.capacity, photoUri: s.photoUri,
             }))
           : prev.services;
 
@@ -909,6 +919,7 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
         subId,
         plantillaItems,
         services,
+        hairCatalogReviewRequired: subChanged ? subId === "peluqueria" : prev.hairCatalogReviewRequired,
       };
       AsyncStorage.setItem(storageKey.current, JSON.stringify(next)).catch(() => {});
       return next;

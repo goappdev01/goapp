@@ -52,6 +52,7 @@ export async function loadSynchronizedBusinessConfig(businessId: string, userId:
       bookingResources: business.bookingResources, bookingBlocks: business.bookingBlocks,
       catalogProducts: items.filter(row => row.catalogKind === "product"),
       services: services.map(row => ({ name: row.title, description: row.description, duration: row.durationMinutes, price: row.price,
+        category: typeof row.catalogMetadata?.category === "string" ? row.catalogMetadata.category : undefined,
         capacity: row.customerCapacity, timing: row.timing, photoUri: row.photoUri })),
       plantillaItems: staff.length ? [{ id: "synchronized-staff", label: "Profesionales", emoji: "", count: staff.length,
         staffIds: staff.map(row => row.id), staffNames: staff.map(row => row.name),

@@ -1,10 +1,19 @@
 import type { BookableItem } from "./booking";
 
-// Bundled DEMO-only resources. Production catalogue images need an authorized
-// company-scoped storage contract; no URL from this map is sent to a server.
+// Bundled shared examples. Only stable references are persisted for real
+// businesses; company-owned photos use their separate Storage contract.
 const photos = {
   "corte-caballero": () => require("../assets/catalog-demo/corte-caballero.jpg"),
   "corte-senora": () => require("../assets/catalog-demo/corte-senora.jpg"),
+  "corte-infantil": () => require("../assets/catalog-demo/corte-infantil.jpg"),
+  "lavado": () => require("../assets/catalog-demo/lavado.jpg"),
+  "mechas": () => require("../assets/catalog-demo/mechas.jpg"),
+  "tratamiento-capilar": () => require("../assets/catalog-demo/tratamiento-capilar.jpg"),
+  "ampolla-mascarilla": () => require("../assets/catalog-demo/ampolla-mascarilla.jpg"),
+  "alisado": () => require("../assets/catalog-demo/alisado.jpg"),
+  "rizos-ondas": () => require("../assets/catalog-demo/rizos-ondas.jpg"),
+  "arreglo-barba": () => require("../assets/catalog-demo/arreglo-barba.jpg"),
+  "corte-barba": () => require("../assets/catalog-demo/corte-barba.jpg"),
   "tinte-coloracion": () => require("../assets/catalog-demo/tinte-coloracion.jpg"),
   "peinado-secado": () => require("../assets/catalog-demo/peinado-secado.jpg"),
   "mechas-tratamiento": () => require("../assets/catalog-demo/mechas-tratamiento.jpg"),
@@ -86,13 +95,22 @@ const photos = {
 } as const;
 type ExampleId = keyof typeof photos;
 
-/** Stable references stored only in the isolated DEMO configuration. */
+/** Stable references for bundled examples in DEMO and real catalogues. */
 const EXAMPLE_PREFIX = "demo-catalog:";
 export const demoCatalogPhotoExamples: ReadonlyArray<{ id: ExampleId; title: string; group: "Peluquerías" | "Restaurantes"; category: string }> = [
   { id: "corte-caballero", title: "Corte caballero", group: "Peluquerías", category: "Cortes" },
   { id: "corte-senora", title: "Corte señora", group: "Peluquerías", category: "Cortes" },
-  { id: "tinte-coloracion", title: "Tinte / coloración", group: "Peluquerías", category: "Tintes" },
-  { id: "peinado-secado", title: "Peinado y secado", group: "Peluquerías", category: "Peinados" },
+  { id: "corte-infantil", title: "Corte infantil", group: "Peluquerías", category: "Cortes" },
+  { id: "lavado", title: "Lavado", group: "Peluquerías", category: "Lavado y peinado" },
+  { id: "mechas", title: "Mechas", group: "Peluquerías", category: "Color" },
+  { id: "tratamiento-capilar", title: "Tratamiento capilar", group: "Peluquerías", category: "Tratamientos" },
+  { id: "ampolla-mascarilla", title: "Ampolla / mascarilla", group: "Peluquerías", category: "Tratamientos" },
+  { id: "alisado", title: "Alisado", group: "Peluquerías", category: "Alisados" },
+  { id: "rizos-ondas", title: "Rizos / ondas", group: "Peluquerías", category: "Lavado y peinado" },
+  { id: "arreglo-barba", title: "Arreglo de barba", group: "Peluquerías", category: "Barbería" },
+  { id: "corte-barba", title: "Corte + barba", group: "Peluquerías", category: "Barbería" },
+  { id: "tinte-coloracion", title: "Tinte / coloración", group: "Peluquerías", category: "Color" },
+  { id: "peinado-secado", title: "Peinado y secado", group: "Peluquerías", category: "Lavado y peinado" },
   { id: "mechas-tratamiento", title: "Mechas / tratamiento", group: "Peluquerías", category: "Tratamientos" },
   { id: "paella-valenciana", title: "Paella valenciana", group: "Restaurantes", category: "Paellas" },
   { id: "tortilla-patatas", title: "Tortilla de patatas", group: "Restaurantes", category: "Tapas" },

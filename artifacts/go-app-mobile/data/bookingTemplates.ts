@@ -7,6 +7,7 @@
  * Each template in a people sector (belleza, salud) also carries a `staff`
  * array used by GoProveedorReservaSheet when booking an external proveedor.
  */
+import { HAIR_SALON_BASE_CATALOG } from "./hairSalonBaseCatalog";
 
 export type TemplateService = {
   title: string;
@@ -43,11 +44,8 @@ export const BOOKING_TEMPLATES: Record<string, BookingTemplate> = {
 
   // ── Belleza ──────────────────────────────────────────────────────────────────
   peluqueria: T("peluqueria", "Peluquería", "💇", "#EC4899", [
-    { title: "Corte de pelo", durationMinutes: 30, customerCapacity: 1, price: 18 },
-    { title: "Tinte + corte", durationMinutes: 90, customerCapacity: 1, price: 55 },
-    { title: "Tinte", durationMinutes: 60, customerCapacity: 1, price: 38 },
-    { title: "Peinado", durationMinutes: 45, customerCapacity: 1, price: 25 },
-    { title: "Lavado y marcado", durationMinutes: 30, customerCapacity: 1, price: 15 },
+    ...HAIR_SALON_BASE_CATALOG.map(service => ({ title: service.name, durationMinutes: service.duration,
+      customerCapacity: 1, price: service.price })),
   ], [
     { name: "Lucía",   emoji: "💇", services: [] },
     { name: "Rosa",    emoji: "💇", services: [] },

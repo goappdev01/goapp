@@ -478,6 +478,9 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
     try {
       await stepSaveRef.current?.();
       const savedConfig = demo?.getSnapshot().config ?? config;
+      if (isLast && savedConfig.subId === "peluqueria" && savedConfig.hairCatalogReviewRequired)
+        throw new Error(lang === "en" ? "Review and confirm the hair salon catalogue before publishing."
+          : "Revisa y confirma el catálogo de peluquería antes de publicar.");
       if (currentStep === 4 && !allowUnnamed && PEOPLE_SECTORS.has(SUB_TO_SECTOR[savedConfig.subId ?? ""] ?? "")) {
         const totalSlots = savedConfig.plantillaItems.reduce((sum, item) => sum + item.count, 0);
         const namedSlots = savedConfig.plantillaItems.reduce((sum, item) => sum + (item.staffNames?.filter(name => name.trim()).length ?? 0), 0);
@@ -2535,11 +2538,15 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
 
   type LocalSvc = SavedService & { id: string };
   const serializeServices = (svcs: LocalSvc[]) => svcs.filter(service => service.name.trim())
-    .map(({ name, description, duration, price, capacity, timing, photoUri }) => ({ name, duration, price, capacity, ...(description ? { description } : {}), ...(timing ? { timing } : {}), ...((demo || isSharedCatalogPhotoReference(photoUri) || isCatalogStorageReference(photoUri) || photoUri === "none") && photoUri ? { photoUri } : {}) }));
+    .map(({ name, description, duration, price, capacity, category, timing, photoUri }) => ({ name, duration, price, capacity,
+      ...(category !== undefined ? { category } : {}), ...(description ? { description } : {}), ...(timing ? { timing } : {}),
+      ...((demo || isSharedCatalogPhotoReference(photoUri) || isCatalogStorageReference(photoUri) || photoUri === "none") && photoUri ? { photoUri } : {}) }));
   const saveServices = useCallback((services: SavedService[]) => {
     const configuredServices = services.filter(service => service.name.trim());
     const checked = serializeServiceConfiguration(configuredServices, { resources: config.bookingResources ?? [] });
-    const withPhotos = checked.map((service, index) => ({ ...service, ...(configuredServices[index]?.photoUri ? { photoUri: configuredServices[index].photoUri } : {}) }));
+    const withPhotos = checked.map((service, index) => ({ ...service,
+      ...(configuredServices[index]?.category !== undefined ? { category: configuredServices[index].category } : {}),
+      ...(configuredServices[index]?.photoUri ? { photoUri: configuredServices[index].photoUri } : {}) }));
     return demo ? demo.updateConfig({ services: withPhotos }) : updateConfig({ services: withPhotos });
   }, [demo, updateConfig, config.bookingResources]);
   const { draft: localSvcs, setValue: setLocalSvcs, flush } = useConfigArrayDraft<LocalSvc, SavedService>(
@@ -2664,6 +2671,10 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
               returnKeyType="done"
             />
             {!!photoBusinessId && <CatalogPhotoButton id={svc.id} businessId={photoBusinessId} title={svc.name} type={config.subId ?? ""} photoUri={svc.photoUri} demo={!!demo} onChange={value => patchSvc(svc.id, { photoUri: value })} />}</View>
+            {config.subId === "peluqueria" && <TextInput style={[c.svcNameInput, { fontSize: 13 }]} value={svc.category ?? ""}
+              onChangeText={category => patchSvc(svc.id, { category })} onBlur={() => { void flush().catch(() => {}); }}
+              accessibilityLabel={lang === "en" ? "Service category" : "Categoría del servicio"}
+              placeholder={lang === "en" ? "Category" : "Categoría"} placeholderTextColor={DIM} />}
             {(config.subId !== "peluqueria" || svc.description !== undefined) && <TextInput style={[c.svcNameInput, { fontSize: 13 }]} value={svc.description ?? ""} onChangeText={description => patchSvc(svc.id, { description })}
               accessibilityLabel={config.subId === "peluqueria" ? (lang === "en" ? "Service description (optional)" : "Descripción del servicio (opcional)") : (lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)")}
               onBlur={() => { void flush().catch(() => {}); }} placeholder={config.subId === "peluqueria" ? (lang === "en" ? "Service description (optional)" : "Descripción del servicio (opcional)") : (lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)")} placeholderTextColor={DIM} />}
@@ -2726,6 +2737,27 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
           <Feather name="plus" size={14} color={BLUE} />
           <Text style={c.addBtnTxt}>{t("biz_add_service_btn")}</Text>
         </TouchableOpacity>
+        {config.subId === "peluqueria" && config.hairCatalogReviewRequired && <TouchableOpacity testID="hair-catalog-confirm"
+          accessibilityRole="button" onPress={() => { void (async () => {
+            const rows = localSvcs.filter(service => service.name.trim());
+            const names = rows.map(service => service.name.trim().toLocaleLowerCase());
+            if (!rows.length || new Set(names).size !== names.length || rows.some(service =>
+              !Number.isInteger(service.duration) || service.duration < 1 || !Number.isFinite(service.price) || service.price < 0
+              || !Number.isInteger(service.capacity ?? 1) || (service.capacity ?? 1) < 1))
+              throw new Error(lang === "en" ? "Check names, prices, durations and capacity."
+                : "Revisa nombres, precios, duraciones y capacidad.");
+            await flushServices();
+            updateConfig({ hairCatalogReviewRequired: false });
+          })().catch(error => Alert.alert(lang === "en" ? "Catalogue not confirmed" : "Catálogo sin confirmar",
+            error instanceof Error ? error.message : String(error))); }}
+          style={[c.addBtn, { minHeight: 48, borderColor: GREEN }]}>
+          <Feather name="check-circle" size={16} color={GREEN} />
+          <Text style={[c.addBtnTxt, { color: GREEN }]}>{lang === "en" ? "Confirm reviewed catalogue" : "Confirmar catálogo revisado"}</Text>
+        </TouchableOpacity>}
+        {config.subId === "peluqueria" && config.hairCatalogReviewRequired && <Text style={{ color: GRAY, fontSize: 12, marginTop: 5 }}>
+          {lang === "en" ? "Check provisional prices: 0 € means a free service when published."
+            : "Revisa los precios provisionales: 0 € significa servicio gratuito al publicar."}
+        </Text>}
       </View>
 
       {!demo && <BookingResourcesEditor resources={config.bookingResources ?? []} services={localSvcs}

@@ -1,4 +1,20 @@
-# Fotografías del catálogo DEMO
+# Fotografías de ejemplo del catálogo compartido
+
+## Catálogo base de peluquería (26/11/2026)
+
+Los cinco recursos iniciales de este catálogo (`corte-caballero.jpg`, `corte-senora.jpg`, `peinado-secado.jpg`, `tinte-coloracion.jpg` y `alisado-plancha.jpg`) ya estaban en esta biblioteca y conservan sus fuentes documentadas más abajo. Las nueve fotografías siguientes se verificaron individualmente en sus páginas de Pexels: figuran como gratuitas bajo la [licencia Pexels](https://www.pexels.com/license/). Se usan como ilustraciones de servicios dentro de GO, nunca como aval de las personas retratadas ni como archivos de stock para descarga independiente. Las copias locales son JPEG cuadrados de 900 × 900 px, optimizados por el CDN de Pexels. Los precios de la plantilla son provisionales y la empresa debe revisarlos antes de publicar.
+
+| Servicio | Archivo | Autor indicado en Pexels | Página fuente | SHA-256 |
+| --- | --- | --- | --- | --- |
+| Corte infantil | `corte-infantil.jpg` | RDNE Stock project | https://www.pexels.com/photo/boy-in-cape-sitting-in-barbers-chair-7697351/ | `19274a37a0877cc23c48d6766a820de74ea572f22150e28674e55ea70bfd5d88` |
+| Lavado | `lavado.jpg` | cottonbro studio | https://www.pexels.com/photo/woman-getting-her-hair-shampoo-3993444/ | `4dcf5750d892a09992c565d7c278e665c32ef440876462ca942aee05e203d8a5` |
+| Mechas | `mechas.jpg` | Doğan Alpaslan Demir | https://www.pexels.com/photo/professional-hair-coloring-in-salon-setting-29555469/ | `d2f98259e8f5aa083a3c3151f6cd3f7bfc925b415bd1ee484a07e31f11843a7f` |
+| Tratamiento capilar | `tratamiento-capilar.jpg` | Beyzanur K. | https://www.pexels.com/photo/close-up-of-woman-applying-hair-treatment-28994649/ | `17946f662ca76122630ed4e36838cf3e75e0e314f73e1e1f42acdde9f77386cb` |
+| Ampolla / mascarilla | `ampolla-mascarilla.jpg` | Beyzanur K. | https://www.pexels.com/photo/applying-hair-serum-with-precision-dropper-28994390/ | `9d9f342bbc3f5e93430f09f2439ccdc0a12af84b4f55604df9a36a46aa390a7b` |
+| Alisado | `alisado.jpg` | Polina Tankilevitch | https://www.pexels.com/photo/photo-of-person-ironing-a-woman-s-hair-3738341/ | `61b0ae297db0c6f7fc304af9b825c00a84aab081e413b366550457c1388e7ccd` |
+| Rizos / ondas | `rizos-ondas.jpg` | Ron Lach | https://www.pexels.com/photo/hands-holding-curling-iron-and-touching-hair-10318040/ | `872bbf63f6b7ea1b49136ca93fd4aaf46960806b1129640851c78d2f55afa0e3` |
+| Arreglo de barba | `arreglo-barba.jpg` | alexandre saraiva carniato | https://www.pexels.com/photo/hands-of-a-person-trimming-a-man-s-beard-5853394/ | `ceff80a37d79752b7e32b989eca8c601265ea1758f015bd4cdb3fc5bd7ee8c50` |
+| Corte + barba | `corte-barba.jpg` | Pavel Danilyuk | https://www.pexels.com/photo/a-man-getting-a-haircut-in-a-barbershop-7518746/ | `c1ec627ff9be46f578bce5706ccd3f51aa164ab6b60ad68357936f5b520a66c8` |
 
 Comprobadas el 24/11/2026. Archivos JPEG de 640 px obtenidos de la imagen original en cada página de Pexels con compresión para móvil. Licencia: [Pexels](https://www.pexels.com/license/), que permite uso en aplicaciones y usos comerciales sin atribución obligatoria, con restricciones sobre reventa de copias sin modificar, plataformas de fotografías y falsa aprobación de marcas o personas. GO permite elegir una referencia como imagen de ficha; no ofrece descarga ni reventa de archivos como banco de imágenes. Los once archivos originales se conservan sin cambios.
 

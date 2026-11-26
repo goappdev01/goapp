@@ -22,7 +22,6 @@ import { hapticToggle } from "@/utils/goHaptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useVerification } from "@/hooks/useVerification";
 import { VerifGateBanner } from "@/components/auth/VerifGate";
-import { BOOKING_TEMPLATES } from "@/data/bookingTemplates";
 import { useBusinessConfig, type SavedService } from "@/contexts/GoBusinessConfigContext";
 import {
   PlantillaItem,
@@ -39,6 +38,7 @@ import {
   DEFAULT_CANCELLATION_POLICY,
   createAvailabilityWindow,
   createBookableItem,
+  isCloudId,
   deleteAvailabilityWindow,
   deleteBookableItem,
   getOwnedAvailabilityWindows as getAvailabilityWindows,
@@ -771,7 +771,9 @@ export function GoBookingScreen({
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
   function toSavedServices(its: BookableItem[]): SavedService[] {
-    return its.map(i => ({ name: i.title, duration: i.durationMinutes, price: i.price }));
+    return its.map(i => ({ name: i.title, duration: i.durationMinutes, price: i.price,
+      description: i.description, category: typeof i.catalogMetadata?.category === "string" ? i.catalogMetadata.category : undefined,
+      capacity: i.customerCapacity, timing: i.timing, photoUri: i.photoUri }));
   }
 
   function deriveScheduleFromWindows(wins: AvailabilityWindow[]) {
@@ -816,7 +818,6 @@ export function GoBookingScreen({
 
     // ── Auto-seed from template on fresh setup ────────────────────────────────
     const tpl = templateRef.current;
-    const tplData = tpl ? BOOKING_TEMPLATES[tpl.id] : null;
     const cfg = configRef.current;
 
     if (tpl && !found.category) {
@@ -831,48 +832,18 @@ export function GoBookingScreen({
       getAvailabilityWindows(found.id),
     ]);
 
-    // ── Seed services ────────────────────────────────────────────────────────
+    // ── Seed only the selected company's current draft. A cleared catalogue
+    // must stay cleared when this screen is reopened. ────────────────────────
     let finalItems = its;
-    if (its.length === 0) {
-      if (tplData && tplData.services.length > 0) {
-        // 1) Prefer BOOKING_TEMPLATES when a template is active
-        const created = await Promise.all(
-          tplData.services.map(svc =>
-            createBookableItem({
-              businessId: found!.id,
-              title: svc.title,
-              type: tplData.id,
-              durationMinutes: svc.durationMinutes,
-              customerCapacity: svc.customerCapacity,
-              unitQuantity: 1,
-              price: svc.price ?? 0,
-              paymentRequired: false,
-              active: true,
-              visible: true,
-            })
-          )
-        );
-        finalItems = created;
-      } else if (cfg.services.length > 0) {
-        // 2) Fall back to GoBusinessConfigContext services
-        const created = await Promise.all(
-          cfg.services.map(svc =>
-            createBookableItem({
-              businessId: found!.id,
-              title: svc.name,
-              type: svc.name,
-              durationMinutes: svc.duration,
-              customerCapacity: 1,
-              unitQuantity: 1,
-              price: svc.price,
-              paymentRequired: false,
-              active: true,
-              visible: true,
-            })
-          )
-        );
-        finalItems = created;
-      }
+    if (!isCloudId(found.id) && its.length === 0 && cfg.services.length > 0) {
+      finalItems = [];
+      for (const svc of cfg.services) finalItems.push(await createBookableItem({
+        businessId: found.id, title: svc.name, type: cfg.subId ?? svc.name,
+        durationMinutes: svc.duration, customerCapacity: svc.capacity ?? 1,
+        unitQuantity: 1, price: svc.price, paymentRequired: false,
+        active: true, visible: true, description: svc.description, timing: svc.timing,
+        catalogMetadata: svc.category ? { category: svc.category } : undefined, photoUri: svc.photoUri,
+      }));
     }
 
     // ── Seed schedule ────────────────────────────────────────────────────────
@@ -924,25 +895,17 @@ export function GoBookingScreen({
     if (loading || !biz) return;
 
     const configServicesSig = JSON.stringify(config.services);
-    if (configServicesSig !== lastItemsSigRef.current && items.length === 0 && config.services.length > 0) {
+    if (!isCloudId(biz.id) && configServicesSig !== lastItemsSigRef.current && items.length === 0 && config.services.length > 0) {
       lastItemsSigRef.current = configServicesSig;
       (async () => {
-        const created = await Promise.all(
-          config.services.map(svc =>
-            createBookableItem({
-              businessId: biz.id,
-              title: svc.name,
-              type: svc.name,
-              durationMinutes: svc.duration,
-              customerCapacity: 1,
-              unitQuantity: 1,
-              price: svc.price,
-              paymentRequired: false,
-              active: true,
-              visible: true,
-            })
-          )
-        );
+        const created: BookableItem[] = [];
+        for (const svc of config.services) created.push(await createBookableItem({
+          businessId: biz.id, title: svc.name, type: config.subId ?? svc.name,
+          durationMinutes: svc.duration, customerCapacity: svc.capacity ?? 1,
+          unitQuantity: 1, price: svc.price, paymentRequired: false,
+          active: true, visible: true, description: svc.description, timing: svc.timing,
+          catalogMetadata: svc.category ? { category: svc.category } : undefined, photoUri: svc.photoUri,
+        }));
         setItems(created);
       })().catch(showSaveError);
     }

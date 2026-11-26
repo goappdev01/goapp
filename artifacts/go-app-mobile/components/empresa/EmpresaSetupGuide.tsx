@@ -51,7 +51,7 @@ import { BookingDepositSplitRow } from "./BookingDepositSplitRow";
 
 export const SETUP_KEY = "go_empresa_setup_v2";
 
-export type SavedService = { name: string; duration: number; price: number };
+export type SavedService = { name: string; duration: number; price: number; category?: string; capacity?: number; photoUri?: string };
 
 export type SetupState = {
   completedSteps: number[];
@@ -128,14 +128,14 @@ const MOCK_LINK = "https://go.teso.app/b/mi-negocio";
 
 const DAYS_SHORT = ["L", "M", "X", "J", "V", "S", "D"];
 
-type MiniService = { id: string; name: string; duration: number; price: number };
+type MiniService = SavedService & { id: string };
 
 
 function makeSuggestedServices(subId: string | null | undefined): MiniService[] {
   if (!subId) return [{ id: "s1", name: "", duration: 30, price: 0 }];
   const suggestions = SUGGESTED_SERVICES[subId];
   if (!suggestions || suggestions.length === 0) return [{ id: "s1", name: "", duration: 30, price: 0 }];
-  return suggestions.map((s, i) => ({ id: `s${i + 1}`, name: s.name, duration: s.duration, price: s.price }));
+  return suggestions.map((s, i) => ({ id: `s${i + 1}`, ...s }));
 }
 
 function Step1Horario({
@@ -993,7 +993,7 @@ export function EmpresaSetupGuide({
       activeDays,
       openFrom,
       openTo,
-      services: services.filter(s => s.name.trim()).map(({ name, duration, price }) => ({ name, duration, price })),
+      services: services.filter(s => s.name.trim()).map(({ id: _id, ...service }) => service),
       paymentPolicy,
       bookingDepositPercent: paymentPolicy === 2 && /^\d{1,2}$/.test(depositPercent) && Number(depositPercent) >= 1 && Number(depositPercent) <= 99 ? Number(depositPercent) : bConfig.bookingDepositPercent,
       approvalPolicy,
@@ -1009,7 +1009,7 @@ export function EmpresaSetupGuide({
     openTo,
     services: services
       .filter(s => s.name.trim())
-      .map(({ name, duration, price }) => ({ name, duration, price })),
+      .map(({ id: _id, ...service }) => service),
     paymentPolicy,
     bookingDepositPercent: paymentPolicy === 2 && /^\d{1,2}$/.test(depositPercent) && Number(depositPercent) >= 1 && Number(depositPercent) <= 99 ? Number(depositPercent) : bConfig.bookingDepositPercent,
     approvalPolicy,

@@ -24,6 +24,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Lang } from "@/i18n/translations";
 import { trSector } from "@/data/goSectorTranslations";
+import { hairSalonBaseServices } from "@/data/hairSalonBaseCatalog";
 
 // ─── Storage key ──────────────────────────────────────────────────────────────
 
@@ -179,11 +180,11 @@ export const SECTORS: Sector[] = [
 // ─── Suggested services per sub-activity ─────────────────────────────────────
 // Usado en EmpresaSetupGuide Step 2 para precargar los servicios del asistente.
 
-export type SuggestedServiceDef = { name: string; duration: number; price: number };
+export type SuggestedServiceDef = { name: string; duration: number; price: number; category?: string; capacity?: number; photoUri?: string };
 
 export const SUGGESTED_SERVICES: Record<string, SuggestedServiceDef[]> = {
   // ── Belleza ──
-  peluqueria:   [{ name: "Corte", duration: 30, price: 15 }, { name: "Lavado", duration: 15, price: 8 }, { name: "Tinte", duration: 90, price: 45 }, { name: "Peinado", duration: 30, price: 20 }, { name: "Tratamiento", duration: 45, price: 30 }],
+  peluqueria:   hairSalonBaseServices(),
   unas:         [{ name: "Manicura", duration: 45, price: 20 }, { name: "Pedicura", duration: 60, price: 25 }, { name: "Uñas acrílicas", duration: 90, price: 45 }, { name: "Nail art", duration: 30, price: 15 }],
   masajes:      [{ name: "Masaje 30 min", duration: 30, price: 30 }, { name: "Masaje 60 min", duration: 60, price: 55 }, { name: "Masaje 90 min", duration: 90, price: 75 }, { name: "Masaje deportivo", duration: 60, price: 60 }],
   estetica:     [{ name: "Facial básico", duration: 60, price: 45 }, { name: "Limpieza facial", duration: 45, price: 35 }, { name: "Tratamiento antiedad", duration: 75, price: 65 }, { name: "Peeling", duration: 45, price: 40 }],

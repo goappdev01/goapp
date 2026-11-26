@@ -47,22 +47,23 @@ test("original and added JPEGs resolve from one bundled library for DEMO and rea
   assert.equal(photos.demoCatalogPhotoSource({...item,title:"Sin foto"}),undefined);
   assert.equal(photos.demoCatalogPhotoSource({...item,photoUri:"https://example.com/other.jpg"}),undefined);
   assert.equal(photos.demoCatalogPhotoSource({...item,photoUri:"data:image/jpeg;base64,/9j/TEST"}).uri,"data:image/jpeg;base64,/9j/TEST");
-  assert.equal(photos.demoCatalogPhotoExamples.length,80);
-  assert.equal(new Set(photos.demoCatalogPhotoExamples.map(example=>example.id)).size,80);
+  assert.equal(photos.demoCatalogPhotoExamples.length,89);
+  assert.equal(new Set(photos.demoCatalogPhotoExamples.map(example=>example.id)).size,89);
   const sources=readFileSync("assets/catalog-demo/SOURCES.md","utf8");
   for(const example of photos.demoCatalogPhotoExamples){
     const file=`assets/catalog-demo/${example.id}.jpg`,data=readFileSync(file);
     assert.equal(data[0],0xff);assert.equal(data[1],0xd8);assert.ok(data.length<200_000,example.id);
     assert.ok(example.category);assert.ok(["Peluquerías","Restaurantes"].includes(example.group));
     if(!names.includes(example.id)){
-      const sourceLine=sources.split("\n").find(line=>line.includes(`\`${example.id}.jpg\``));
+      const sourceLine=sources.split("\n").find(line=>line.startsWith("|")&&line.includes(`\`${example.id}.jpg\``));
       assert.ok(sourceLine,`Missing source for ${example.id}`);
-      assert.match(sourceLine,/CC0 1\.0/);
+      if(!["corte-infantil","lavado","mechas","tratamiento-capilar","ampolla-mascarilla","alisado","rizos-ondas","arreglo-barba","corte-barba"].includes(example.id))
+        assert.match(sourceLine,/CC0 1\.0/);
       assert.ok(sourceLine.includes(createHash("sha256").update(data).digest("hex")));
     }
   }
   assert.equal(photos.demoCatalogPhotoExamples.filter(example=>example.group==="Restaurantes").length,60);
-  assert.equal(photos.demoCatalogPhotoExamples.filter(example=>example.group==="Peluquerías").length,20);
+  assert.equal(photos.demoCatalogPhotoExamples.filter(example=>example.group==="Peluquerías").length,29);
   for(let i=0;i<names.length;i++) assert.match(photos.demoCatalogPhotoSource({...item,title:"Otro servicio",photoUri:photos.demoCatalogExampleReference(names[i])}),new RegExp(names[i]));
   assert.equal(photos.demoCatalogPhotoSource({...item,photoUri:"demo-catalog:missing"}),undefined);
   assert.match(photos.catalogPhotoSource({...item,businessId:"real-company",photoUri:photos.demoCatalogExampleReference("gazpacho")}),/gazpacho/);
@@ -88,10 +89,10 @@ test("DEMO photo control offers filtered local examples without requesting perso
   const gallery=CatalogExampleGallery({visible:true,onSelect:value=>changes.push(value),onClose:()=>{open=false;}});
   assert.equal(gallery.props.visible,true);
   const list=nodes(gallery).find(node=>node.type==="flat-list");
-  assert.equal(list.props.data.length,80);
+  assert.equal(list.props.data.length,89);
   assert.equal(list.props.initialNumToRender,12);
   const choices=list.props.data.map(item=>list.props.renderItem({item}));
-  assert.equal(choices.length,80);
+  assert.equal(choices.length,89);
   assert.equal(nodes(gallery).filter(node=>node.type==="text").some(node=>node.props.children.includes("Peluquerías")),true);
   assert.equal(nodes(gallery).filter(node=>node.type==="text").some(node=>node.props.children.includes("Restaurantes")),true);
   for(const name of names)assert.ok(choices.some(node=>node.props.testID===`catalog-example-${name}`));
