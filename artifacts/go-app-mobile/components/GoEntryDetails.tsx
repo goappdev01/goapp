@@ -215,6 +215,7 @@ export function GoEntryContract({ entry }: { entry: GoEntry }) {
   const agreedMoney = (cents:number) => new Intl.NumberFormat(lang==="en"?"en-GB":"es-ES",{style:"currency",currency:currency||"EUR"}).format(cents/100);
   const paidPercent = totalCents ? Math.round(confirmedCents * 100 / totalCents) : 0;
   return <View testID="entry-contract" style={{ gap: accepted ? 4 : 8 }}>
+    {entry.bookingCategory === "restaurante" && entry.bookingPartySize != null && <Text testID="entry-restaurant-party-size" style={s.text}>{entry.bookingPartySize} {lang === "en" ? (entry.bookingPartySize === 1 ? "diner" : "diners") : (entry.bookingPartySize === 1 ? "comensal" : "comensales")}</Text>}
     {(entry.customerBooking || entry.businessBooking || entry.bookingPerspective || services?.length || quote) && <Text style={s.label}>{lang === "en" ? "Booked services" : "Servicios contratados"}</Text>}
     {quote ? quote.lines.map(line => <Text key={line.itemId} style={s.text}>{line.name} · {line.included ? (lang === "en" ? "Included" : "Incluido") : money(line.charge, line.currency)}</Text>)
       : services?.length ? services.map((service, index) => <Text key={`${service.id}-${index}`} style={s.text}>{service.title}{(!("priceKnown" in service) || service.priceKnown !== false) && service.price != null ? " · " + money(service.price, service.currency) : ""}</Text>)

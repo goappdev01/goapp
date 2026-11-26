@@ -6,6 +6,7 @@ import type { BookingTimeline } from "./bookingTimeline";
 /** Labels/scope from the existing reservation; never an authorization or availability source. */
 export type BookingChangeSelection = {
   business: Business; item: BookableItem; services: BookingService[]; staff?: Staff;
+  peopleCount?: number;
   durationMinutes: number; timeline?: BookingTimeline;
   rootIds?: string[]; selectedAssociationIds?: string[]; totalPrice?: number;
 };
@@ -53,7 +54,7 @@ export function bookingChangeSelection(entry: GoEntry, original?: Partial<Bookin
       paymentRequired: false, active: true, visible: true },
     services: services.map(service => ({ ...service, price: service.price ?? 0 })),
     staff: staffId ? { id: staffId, businessId: entry.businessId, name: entry.professionalName || "Profesional asignado", active: true } : undefined,
-    durationMinutes: minutes, timeline,
+    durationMinutes: minutes, timeline, peopleCount: original?.peopleCount,
     rootIds: entry.bookingCatalog?.rootIds?.length ? entry.bookingCatalog.rootIds : original?.catalogSnapshot?.rootIds?.length ? original.catalogSnapshot.rootIds : ids,
     selectedAssociationIds: entry.bookingCatalog?.selectedAssociationIds ?? original?.catalogSnapshot?.selectedAssociationIds,
     totalPrice: entry.bookingCatalog?.totalPrice ?? entry.bookingTotalPrice ?? original?.catalogSnapshot?.totalPrice ?? original?.totalPrice ?? timeline?.totalPrice,

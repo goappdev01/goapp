@@ -45,6 +45,8 @@ export type FloorElement = {
 export type FloorPlan = {
   id: string;
   businessId: string;
+  /** Optional legal/operational cap, never higher than the sum of free tables. */
+  occupancyLimit?: number;
   backgroundImage?: string;
   elements: FloorElement[];
   updatedAt: number;

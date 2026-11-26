@@ -93,6 +93,8 @@ export type StaffScheduleConfig = {
 export type PaymentMethodId = "card" | "bank" | "stripe" | "tpv" | "other";
 
 export type BusinessConfig = {
+  /** Owner-only layout; live occupancy is derived from canonical bookings. */
+  floorPlan?: import("@/data/floorPlan").FloorPlan;
   catalogProducts?: import("@/data/booking").BookableItem[];
   catalogAssociations?: import("@/data/catalogAssociations").CatalogAssociation[];
   businessName:     string;

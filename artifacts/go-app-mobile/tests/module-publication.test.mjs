@@ -9,10 +9,10 @@ const scope = { exports: {} };
 vm.runInNewContext(ts.transpileModule(readFileSync('../../lib/api-zod/src/module-publication.ts', 'utf8'), { compilerOptions: { esModuleInterop: false, alwaysStrict: false, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, scope);
 const p = scope.exports, plain = value => JSON.parse(JSON.stringify(value));
 const sectors = [{ id: 'belleza', subs: [{ id: 'peluqueria' }, { id: 'barberia' }, { id: 'unas' }] }, { id: 'restauracion', subs: [{ id: 'restaurante' }] }];
-test('pilot exposes only hairdressers while retaining the full original catalogue', () => {
+test('pilot exposes hairdressers and restaurants while retaining the full original catalogue', () => {
   const before = JSON.stringify(sectors), result = p.visibleBookingSectors(sectors);
-  assert.deepEqual(plain(result), [{ id: 'belleza', subs: [{ id: 'peluqueria' }] }]); assert.equal(JSON.stringify(sectors), before);
-  assert.equal(p.bookingActivityEnabled('barberia'), false); assert.equal(p.bookingActivityEnabled('restaurante'), false);
+  assert.deepEqual(plain(result), [{ id: 'belleza', subs: [{ id: 'peluqueria' }] }, { id: 'restauracion', subs: [{ id: 'restaurante' }] }]); assert.equal(JSON.stringify(sectors), before);
+  assert.equal(p.bookingActivityEnabled('barberia'), false); assert.equal(p.bookingActivityEnabled('restaurante'), true);
 });
 test('internal view and business authorization are different decisions', () => {
   assert.deepEqual(plain(p.visibleBookingSectors(sectors, p.defaultGoModulePublication(), true)), sectors);
@@ -20,7 +20,7 @@ test('internal view and business authorization are different decisions', () => {
   assert.equal(decision.visible, true); assert.equal(decision.operable, true); assert.equal(decision.allowed, false);
 });
 test('new releases are configurable without rewriting sector components', () => {
-  const policy = p.parseGoModulePublication({ version: 1, audience: 'general', stages: { 'reservas.restauracion': 'public' } });
+  const policy = p.parseGoModulePublication({ version: 1, audience: 'general', stages: { 'reservas.restauracion': 'public', 'reservas.restaurante': 'public' } });
   assert.equal(p.bookingActivityEnabled('restaurante', policy), true); assert.equal(p.bookingActivityEnabled('peluqueria', policy), false);
   assert.deepEqual(plain(p.visibleBookingSectors(sectors, policy)).map(row => row.id), ['restauracion']);
 });
@@ -28,8 +28,12 @@ test('exact legacy category normalization does not infer a sector from a busines
   assert.equal(p.canonicalBookingActivity('Belleza Peluquería'), 'peluqueria'); assert.equal(p.bookingActivityEnabled('Belleza Peluquería'), true);
   for (const category of ['belleza', 'restauracion', '', null, 'Mi peluquería favorita', 'GO Restaurante']) assert.equal(p.bookingActivityEnabled(category), false);
 });
-test('invalid configuration cannot enable unpublished sectors', () => {
-  for (const value of [null, [], 'all', { version: 2, audience: 'all', stages: { 'reservas.restaurante': 'public' } }]) assert.equal(p.bookingActivityEnabled('restaurante', p.parseGoModulePublication(value)), false);
+test('invalid configuration falls back to the validated pilot, never enables other sectors', () => {
+  for (const value of [null, [], 'all', { version: 2, audience: 'all', stages: { 'reservas.restaurante': 'public' } }]) {
+    const policy=p.parseGoModulePublication(value);
+    assert.equal(p.bookingActivityEnabled('restaurante', policy), true);
+    assert.equal(p.bookingActivityEnabled('barberia', policy), false);
+  }
 });
 test('every existing activity is retained in the shared release registry', () => {
   const catalogue = readFileSync('data/goSectorData.ts', 'utf8'); let sector = '';
@@ -44,7 +48,7 @@ test('search uses the same projection for categories, recent businesses, text an
   assert.match(code, /searchBusinesses\(query\)\)\)\.filter\(businessVisible\)/); assert.match(code, /initialBusinessId && all\.find\(business => business\.id === initialBusinessId && businessVisible\(business\)\)/);
   assert.match(code, /if \(!businessVisible\(b\)\) return/);
 });
-test('USER with an owner demo repository still sees only the pilot; internal preview requires verified ADMIN/BUSINESS', () => {
+test('USER with an owner demo repository sees only published modules; internal preview requires verified ADMIN/BUSINESS', () => {
   const fixture = (view, admin = { checking: false, allowed: true, level: 'owner', userId: 'owner', permissions: ['development'] }) => {
     const scoped = { exports: {}, require(name) {
       if (name === 'react') return { useState: initial => [initial(), () => {}], useEffect() {} };
@@ -58,7 +62,7 @@ test('USER with an owner demo repository still sees only the pilot; internal pre
     return scoped.exports.useBookingModulePublication(true, true);
   };
   const user = fixture({}); assert.equal(user.internalAccess, false);
-  assert.deepEqual(plain(p.visibleBookingSectors(sectors, user.publication, user.internalAccess)), [{ id: 'belleza', subs: [{ id: 'peluqueria' }] }]);
+  assert.deepEqual(plain(p.visibleBookingSectors(sectors, user.publication, user.internalAccess)), [{ id: 'belleza', subs: [{ id: 'peluqueria' }] }, { id: 'restauracion', subs: [{ id: 'restaurante' }] }]);
   assert.equal(fixture({ isAdminView: true }).internalAccess, true);
   const business = fixture({ isBusinessPreview: true }); assert.equal(business.internalAccess, true); assert.equal(business.remoteInternalAccess, false);
   assert.equal(fixture({ isBusinessPreview: true }, { checking: false, allowed: false, level: null, userId: null, permissions: [] }).internalAccess, false);

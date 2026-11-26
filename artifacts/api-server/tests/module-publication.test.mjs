@@ -15,6 +15,7 @@ test('release boundaries: discovery, direct writes, internal authorization and p
     for(const route of ['/bookings/timeline','/bookings/catalog','/catalog/quote','/booking-discounts/quote','/booking-discounts/prices'])router.post(route,(_req,res)=>res.json({routed:true}));
     router.get('/booking-availability',(_req,res)=>res.json({slots:[]}));router.use(business);export default router;`,
     resolveDir: process.cwd(), loader: 'ts' }, outfile, bundle: true, platform: 'node', format: 'esm',
+    alias: { '@workspace/api-zod': path.resolve('../../lib/api-zod/src/module-publication.ts') },
     banner: { js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);" } });
   const { default: router } = await import(pathToFileURL(outfile));
   const { default: express } = await import('express');
@@ -23,7 +24,10 @@ test('release boundaries: discovery, direct writes, internal authorization and p
   const realFetch = globalThis.fetch, calls = [];
   const keys = ['SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY', 'GO_MODULE_PUBLICATION'];
   const before = Object.fromEntries(keys.map(key => [key, process.env[key]]));
-  process.env.SUPABASE_URL = 'https://publication-test.invalid'; process.env.SUPABASE_PUBLISHABLE_KEY = 'test-public'; delete process.env.GO_MODULE_PUBLICATION;
+  process.env.SUPABASE_URL = 'https://publication-test.invalid'; process.env.SUPABASE_PUBLISHABLE_KEY = 'test-public';
+  // The hidden-module regression uses an explicit internal stage; the default
+  // restaurant pilot is checked separately below.
+  process.env.GO_MODULE_PUBLICATION = JSON.stringify({ version: 1, audience: 'pilot', stages: { 'reservas.restaurante': 'internal' } });
   const userId = '11111111-1111-4111-8111-111111111111', hair = '22222222-2222-4222-8222-222222222222', restaurant = '33333333-3333-4333-8333-333333333333';
   const businesses = [{ id: hair, booking_enabled: true, ui_metadata: { category: 'Belleza Peluquería' } }, { id: restaurant, booking_enabled: true, ui_metadata: { category: 'restaurante' } }];
   let membership = null, upstreamFailure = false;
@@ -98,7 +102,10 @@ test('release boundaries: discovery, direct writes, internal authorization and p
     await t.test('later activation comes from server config, never a request boolean', async () => {
       process.env.GO_MODULE_PUBLICATION = JSON.stringify({ version: 1, audience: 'pilot', stages: { 'reservas.restaurante': 'pilot' } });
       assert.equal((await post('/bookings/timeline', restaurant)).status, 200);
-      process.env.GO_MODULE_PUBLICATION = '{invalid'; assert.equal((await post('/bookings/timeline', restaurant)).status, 403);
+      delete process.env.GO_MODULE_PUBLICATION;
+      assert.equal((await post('/bookings/timeline', restaurant)).status, 200, 'the validated restaurant engine is in the default pilot release');
+      process.env.GO_MODULE_PUBLICATION = JSON.stringify({ version: 1, audience: 'pilot', stages: { 'reservas.restaurante': 'internal' } });
+      assert.equal((await post('/bookings/timeline', restaurant)).status, 403);
     });
   } finally {
     globalThis.fetch = realFetch; for (const key of keys) { if (before[key] === undefined) delete process.env[key]; else process.env[key] = before[key]; }

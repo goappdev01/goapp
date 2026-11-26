@@ -22,6 +22,7 @@ export function customerBookingEntry(booking: Booking, business: Business, item:
         bookingCategory: business.category,
         bookingCatalog: booking.catalogSnapshot,
         bookingServices: booking.services,
+        bookingPartySize: booking.restaurantPartySize,
         bookingTotalPrice: booking.totalPrice, bookingCurrency: booking.currency,
         bookingPaymentTerms: booking.paymentTermsSnapshot, bookingPaymentStatus: booking.paymentStatus,
         contactName: business.name || booking.receipt?.businessName || "", phone: business.phone || booking.receipt?.businessPhone || "", whatsapp:business.whatsapp || booking.receipt?.businessWhatsapp, date: start.dateISO, dateISO: start.dateISO, time: start.time, startTime: start.time, endTime: end.time,

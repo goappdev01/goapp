@@ -26,6 +26,7 @@ export function defaultGoModulePublication(): GoModulePublication {
   return { version: 1, audience: "pilot", stages: {
     ...Object.fromEntries(GO_RESERVATION_SECTORS.map(id => [`reservas.${id}`, "internal" as const])),
     "reservas.peluqueria": "pilot",
+    "reservas.restaurante": "pilot",
     "go.imprimir": "development",
   } };
 }

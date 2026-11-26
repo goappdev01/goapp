@@ -49,6 +49,8 @@ import {
   makeReservationId,
 } from "@/data/floorPlan";
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
+import { getCloudConfiguration, getLiveBusinessBookings, isCloudId } from "@/data/booking";
+import type { BusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { type PlantillaItem } from "@/data/goSectorData";
 import { getBusinessIcon } from "@/lib/businessIcons";
 import { visibleBusinessDemoElements, businessDemoElementRequiresReview } from "@/data/businessDemoStore";
@@ -1221,7 +1223,7 @@ function SelectedElementBar({ el, mode, onEdit, onBook, onDeselect }: {
 
       {/* Right: actions */}
       <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-        {canBook && mode === "cliente" && (
+        {Boolean(demo) && canBook && mode === "cliente" && (
           <TouchableOpacity style={seb.bookBtn} onPress={onBook} activeOpacity={0.85}>
             <Feather name="calendar" size={13} color="#fff" />
             <Text style={seb.bookTxt}>{t("floor_book")}</Text>
@@ -1621,9 +1623,41 @@ function SplitReservationsPanel({
 export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessName, templateId, onClose, onNext, hideFAB = false, showBackButton = false, embeddedInBookingPanel = false, onFooterHeightChange }: PlanoEmpresaPanelProps) {
   const insets = useSafeAreaInsets();
   const { t, lang } = useLanguage();
-  const { config: bizConfig, demo } = useBusinessConfig();
+  const { config: bizConfig, demo, updateConfig, waitForConfigSave } = useBusinessConfig();
   const businessId = demo?.businessId ?? requestedBusinessId;
-  const floorRepository = demo ?? { loadFloorPlan, saveFloorPlan, loadReservations, saveReservations };
+  const floorRepository = demo ?? {
+    loadFloorPlan: async (id: string) => {
+      if (!isCloudId(id)) throw new Error("Selecciona una empresa real antes de consultar su plano.");
+      const cloud = await getCloudConfiguration<BusinessConfig>(id);
+      if (cloud?.floorPlan) {
+        if (cloud.floorPlan.businessId !== id) throw new Error("El plano guardado pertenece a otra empresa.");
+        const cached = await loadFloorPlan(id);
+        return cached?.id === cloud.floorPlan.id && cached.backgroundImage?.startsWith("file:")
+          ? { ...cloud.floorPlan, backgroundImage: cached.backgroundImage } : cloud.floorPlan;
+      }
+      // Older plans remain available for an explicit save into the hosted configuration.
+      return loadFloorPlan(id);
+    },
+    saveFloorPlan: async (next: FloorPlan) => {
+      if (!isCloudId(next.businessId) || next.businessId !== businessId || !waitForConfigSave)
+        throw new Error("No se puede verificar la empresa del plano.");
+      const hosted = { ...next, backgroundImage: next.backgroundImage?.startsWith("file:") ? undefined : next.backgroundImage };
+      updateConfig({ floorPlan: hosted }, businessId);
+      await waitForConfigSave(businessId);
+      // Device storage is a cache only, written after the hosted save succeeds.
+      await saveFloorPlan(next);
+    },
+    loadReservations: async (_planId: string): Promise<FloorReservation[]> => {
+      if (!isCloudId(businessId)) throw new Error("Selecciona una empresa real para consultar reservas.");
+      const bookings = await getLiveBusinessBookings(businessId);
+      return bookings.filter(row => row.restaurantTableId && ["PENDING", "CONFIRMED"].includes(row.serverStatus ?? ""))
+        .map(row => ({ id: row.id, planId: _planId, elementId: row.restaurantTableId!,
+          customerName: row.receipt?.customerName || "Reserva", date: row.startDatetime.slice(0, 10),
+          time: row.startDatetime.slice(11, 16), status: row.serverStatus === "CONFIRMED" ? "confirmada" as const : "pendiente" as const,
+          createdAt: Date.parse(row.startInstant ?? row.startDatetime), }));
+    },
+    saveReservations: async () => { throw new Error("Las reservas reales solo se guardan mediante el motor de reservas."); },
+  };
   const [viewportWidth, setViewportWidth] = useState(() => Dimensions.get("window").width);
   const isCompactPhone = Platform.OS === "ios" ? !Platform.isPad : viewportWidth < 600;
 
@@ -1964,7 +1998,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
 
   useEffect(() => {
     let active = true;
-    floorRepository.loadReservations(plan.id).then(next => { if (active) setReservations(next); }).catch(error => { if (active && demo) Alert.alert("Reservas", String(error)); });
+    floorRepository.loadReservations(plan.id).then(next => { if (active) setReservations(next); }).catch(error => { if (active) Alert.alert("Reservas", String(error)); });
     return () => { active = false; };
   }, [plan.id, demoReservationsSignature]);
 
@@ -1998,7 +2032,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
     setSaving(true);
     try {
       await floorRepository.saveFloorPlan(plan);
-      await floorRepository.saveReservations(plan.id, reservations);
+      if (demo) await floorRepository.saveReservations(plan.id, reservations);
       setHasChanges(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       return true;
@@ -2194,11 +2228,10 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
   }, [plan.elements, updatePlan, t]);
 
   const handleBooked = useCallback(async (r: FloorReservation & { dateISO?: string }) => {
+    if (!demo) throw new Error("Las reservas reales se crean desde el catálogo y se verifican en Supabase.");
     const next = [r, ...reservations];
-    if (demo) {
-      await demo.saveFloorPlan(plan);
-      await demo.saveReservations(plan.id, next);
-    } else { void saveReservations(plan.id, next); }
+    await demo.saveFloorPlan(plan);
+    await demo.saveReservations(plan.id, next);
     setReservations(next);
     updatePlan(p => ({
       ...p,
@@ -2209,8 +2242,9 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
   }, [reservations, plan, demo, updatePlan]);
 
   const handleBook = useCallback(() => {
+    if (!demo) return;
     if (selectedEl) setClientBookEl(selectedEl);
-  }, [selectedEl]);
+  }, [demo, selectedEl]);
 
   const visibleStatusLegend: FloorElementStatus[] = mode === "cliente"
     ? ["disponible"] : ["disponible", "reservado", "ocupado", "bloqueado"];
@@ -2226,6 +2260,16 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
         {showBackButton && <View style={{ position: "absolute", left: 14, top: 4 }}><GoCloseButton level="panel" onPress={onClose} accessibilityLabel={t("floor_close")} /></View>}
         <Text style={s.titleTxt}>{t("view_mode_plano")}</Text>
         <Text style={s.subtitleTxt}>{businessName ?? t("floor_my_business")}</Text>
+      </View>}
+
+      {!demo && bizConfig.subId === "restaurante" && mode === "editor" && <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 5 }}>
+        <Text style={{ color: TEXT, fontWeight: "700" }}>{lang === "en" ? "Maximum occupancy" : "Aforo máximo"}</Text>
+        <TextInput testID="restaurant-occupancy-limit" accessibilityLabel={lang === "en" ? "Maximum occupancy" : "Aforo máximo"}
+          keyboardType="number-pad" maxLength={4} placeholder={lang === "en" ? "Tables total" : "Suma de mesas"}
+          value={plan.occupancyLimit == null ? "" : String(plan.occupancyLimit)}
+          onChangeText={value => { if (value && (!/^\d{1,4}$/.test(value) || Number(value)<1)) return;
+            updatePlan(previous => ({ ...previous, occupancyLimit: value ? Number(value) : undefined })); }}
+          style={{ minWidth: 112, minHeight: 44, borderWidth: 1, borderColor: BORDER, borderRadius: 8, paddingHorizontal: 10, color: TEXT }} />
       </View>}
 
       {legacyCandidates.length > 0 && <TouchableOpacity onPress={reviewLegacy} accessibilityRole="button"
@@ -2564,14 +2608,14 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
         onClose={() => setMassDupEl(null)}
       />
 
-      <ClientBookingSheet
+      {demo && <ClientBookingSheet
         el={clientBookEl}
         planId={plan.id}
         visible={clientBookEl !== null}
         onClose={() => setClientBookEl(null)}
         onBooked={handleBooked}
         demo={Boolean(demo)}
-      />
+      />}
 
       <ReservationsList
         reservations={reservations}

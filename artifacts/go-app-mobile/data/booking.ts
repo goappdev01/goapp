@@ -118,6 +118,9 @@ export type Booking = {
   endDatetime: string; // ISO
   unitsReserved: number;
   peopleCount: number;
+  /** Present only for an authenticated restaurant command. */
+  restaurantPartySize?: number;
+  restaurantTableId?: string;
   status: BookingStatus;
   holdExpiresAt?: string; // ISO — only for HOLD status
   paymentStatus: "none" | "pending" | "paid";
@@ -376,6 +379,8 @@ type RemoteService = {
 };
 
 type RemoteBooking = {
+  party_size?: number | null;
+  restaurant_table_id?: string | null;
   total_price?: number | string | null;
   currency?: string;
   id: string;
@@ -475,7 +480,9 @@ function mapRemoteBooking(row: RemoteBooking): Booking {
     startDatetime: startsAt,
     endDatetime: endsAt,
     unitsReserved: 1,
-    peopleCount: 1,
+    peopleCount: row.party_size ?? 1,
+    ...(row.party_size != null ? { restaurantPartySize: row.party_size } : {}),
+    ...(row.restaurant_table_id ? { restaurantTableId: row.restaurant_table_id } : {}),
     status,
     paymentStatus: "none",
     notes: row.notes ?? undefined,
@@ -537,6 +544,7 @@ async function createRemoteBooking(candidate: Omit<Booking, "id"> & { id?: strin
         ...(candidate.catalogSnapshot ? { root_ids: candidate.catalogSnapshot.rootIds, selected_ids: candidate.catalogSnapshot.selectedAssociationIds, expected_quote: candidate.catalogSnapshot } : { service_ids: serviceIds, status: "CONFIRMED" }),
         starts_at: candidate.startInstant ?? new Date(candidate.startDatetime).toISOString(), staff_id: candidate.staffId ?? null,
         request_key: candidate.id, notes: candidate.notes ?? null, expected_plan: candidate.timingSnapshot,
+        ...(candidate.restaurantPartySize !== undefined ? { party_size: candidate.restaurantPartySize } : {}),
         ends_at: candidate.endInstant,
         ...(isCloudId(candidate.customerId) && candidate.customerId !== customerId ? { customer_id: candidate.customerId } : {}) }),
     },
@@ -1636,7 +1644,7 @@ function deduplicateBookings<T extends { staffId?: string; startDatetime: string
 }
 
 /** The database is the sole live availability authority. Never fall back to a local grid. */
-export async function getTimelineAvailability(businessId: string, serviceIds: string[], dateISO: string, staffId?: string, options: { days?: number; datesOnly?: boolean; visualStepMinutes?: number; registeredSourceId?:string } = {}): Promise<{ slots: SlotWithStatus[]; availableDates: string[]; timezone: string }> {
+export async function getTimelineAvailability(businessId: string, serviceIds: string[], dateISO: string, staffId?: string, options: { days?: number; datesOnly?: boolean; visualStepMinutes?: number; registeredSourceId?:string; partySize?: number } = {}): Promise<{ slots: SlotWithStatus[]; availableDates: string[]; timezone: string }> {
   const query = new URLSearchParams({ business_id: businessId, service_ids: serviceIds.join(","), dateISO });
   // The server still evaluates every minute and retains each exact free boundary.
   // Sampling only the response avoids shipping hundreds of duplicate plan bodies.
@@ -1644,6 +1652,7 @@ export async function getTimelineAvailability(businessId: string, serviceIds: st
   query.set("gap_policy_version","1");
   query.set("phase_policy_version","1");
   if (staffId) query.set("staff_id", staffId);
+  if (options.partySize !== undefined) query.set("party_size", String(options.partySize));
   if (options.days) query.set("days", String(options.days));
   if (options.datesOnly) query.set("datesOnly", "true");
   const result = await supabaseApiRequest<{ version: number; gapPolicyVersion?:number; phasePolicyVersion?:number; slots: BookingTimeline[]; availableDates: string[]; timezone: string }>(`/supabase/booking-availability?${query}`, options.registeredSourceId ? {headers:{"x-go-booking-source":options.registeredSourceId}} : {}, true);

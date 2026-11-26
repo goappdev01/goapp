@@ -233,6 +233,7 @@ export type GoEntry = {
   bookingResourceNames?: Record<string, string>;
   bookingCatalog?: import("@/data/catalogAssociations").CatalogQuote;
   bookingServices?: import("@/data/booking").Booking["services"];
+  bookingPartySize?: number;
   bookingTotalPrice?: number | null;
   bookingCurrency?: string;
   bookingPaymentTerms?: import("@/data/bookingServices").BookingPaymentTerms;

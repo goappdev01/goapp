@@ -462,6 +462,10 @@ export function BookingSearchOverlay({
   const [results, setResults] = useState<Business[]>([]);
   const [searching, setSearching] = useState(false);
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
+  const [partyText, setPartyText] = useState("2");
+  const restaurantBooking = !demoRepository && canonicalBookingActivity(selectedBusiness?.category) === "restaurante";
+  const partySize = restaurantBooking ? (changeSelection?.peopleCount ?? Number(partyText)) : 1;
+  const validPartySize = Number.isInteger(partySize) && partySize >= 1 && partySize <= 40;
   const [recentBizs, setRecentBizs] = useState<Business[]>([]);
   const [items, setItems] = useState<BookableItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<BookableItem | null>(null);
@@ -476,7 +480,7 @@ export function BookingSearchOverlay({
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<Staff | null | "none">(null);
   const [selectedDate, setSelectedDate] = useState(isValidBookingDateISO(initialDateISO) ? initialDateISO : formatISODate(getToday()));
-  const selectionScope = `${selectedBusiness?.id ?? ""}|${selectedServiceIds.join(",")}|${selectedStaff && selectedStaff !== "none" ? selectedStaff.id : "any"}`;
+  const selectionScope = `${selectedBusiness?.id ?? ""}|${selectedServiceIds.join(",")}|${selectedStaff && selectedStaff !== "none" ? selectedStaff.id : "any"}|${restaurantBooking ? partySize : ""}`;
   const slotScope = `${selectionScope}|${selectedServices.map(service=>service.id).join(",")}|${catalogQuote?.selectedAssociationIds.join(",") ?? ""}|${catalogQuote?.totalPrice ?? ""}|${selectedDate}|${visible}|${step}`;
   const currentSlotScope = useRef(""); currentSlotScope.current = slotScope;
   const [slots, setSlots] = useState<SlotWithStatus[]>([]);
@@ -677,13 +681,16 @@ export function BookingSearchOverlay({
       "| date →", selectedDate,
       "| staffId usado →", staffId ?? "(sin profesional)");
     try {
+    if (restaurantBooking && !validPartySize) throw new Error("Indica entre 1 y 40 comensales.");
     const raw = demoRepository ? await demoRepository.getAllSlots(
       selectedBusiness.id,
       selectedItem.id,
       selectedDate,
       staffId,
       selectedServices.map(service => service.id),
-    ) : changeSelection
+    ) : restaurantBooking
+      ? (await getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), selectedDate, staffId, { partySize })).slots
+      : changeSelection
       ? (await getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), selectedDate, staffId)).slots
       : await getAllSlots(selectedBusiness.id, selectedItem.id, selectedDate, staffId, selectedServices.map(service => service.id));
     if (generation !== slotGeneration.current || scope !== currentSlotScope.current) return;
@@ -707,14 +714,15 @@ export function BookingSearchOverlay({
         setSlots([]); setSlotError(error instanceof Error ? error.message : "No se pudo consultar la disponibilidad.");
       }
     } finally { if (generation === slotGeneration.current && scope === currentSlotScope.current) setLoadingSlots(false); }
-  }, [selectedBusiness, selectedItem, selectedDate, selectedStaff, selectedServices, demoRepository, changeSelection, lang, slotScope]);
+  }, [selectedBusiness, selectedItem, selectedDate, selectedStaff, selectedServices, demoRepository, changeSelection, restaurantBooking, partySize, validPartySize, lang, slotScope]);
 
   useEffect(() => {
     let current = true;
     setAvailableDates(null);
     if (!visible || demoRepository && !demoRepository.getAvailableDates || step !== "slots" || !selectedBusiness || !selectedItem) return;
     const staffId = selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined;
-    void (demoRepository?.getAvailableDates ? demoRepository.getAvailableDates(selectedBusiness.id, selectedServices.map(service => service.id), availabilityDays[0], staffId, availabilityDays.length).then(availableDates=>({availableDates})) : getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), availabilityDays[0], staffId, { days: availabilityDays.length, datesOnly: true }))
+    if (restaurantBooking && !validPartySize) return;
+    void (demoRepository?.getAvailableDates ? demoRepository.getAvailableDates(selectedBusiness.id, selectedServices.map(service => service.id), availabilityDays[0], staffId, availabilityDays.length).then(availableDates=>({availableDates})) : getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), availabilityDays[0], staffId, { days: availabilityDays.length, datesOnly: true, ...(restaurantBooking ? { partySize } : {}) }))
       .then(result => { if (current) setAvailableDates(result.availableDates); })
       .catch(error => { if (current) { setAvailableDates([]); setSlotError(error instanceof Error ? error.message : "No se pudieron consultar las fechas."); } });
     return () => { current = false; };
@@ -744,7 +752,7 @@ export function BookingSearchOverlay({
   };
 
   const handleSaveServices = () => {
-    if (!serviceSelection) return;
+    if (!serviceSelection || restaurantBooking && !validPartySize) return;
     {
       if (!catalogQuote?.ready || catalogQuote.businessId !== selectedBusiness?.id || JSON.stringify(catalogQuote.rootIds) !== JSON.stringify(selectedServiceIds)) return;
       const services = catalogBookingServices(catalogQuote);
@@ -803,7 +811,7 @@ export function BookingSearchOverlay({
         const staffId=selectedStaff && selectedStaff!=="none"?selectedStaff.id:slot.staffId;
         const fresh=demoRepository
           ? await demoRepository.getAllSlots(selectedBusiness.id,selectedItem.id,selectedDate,staffId,selectedServices.map(service=>service.id))
-          : (await getTimelineAvailability(selectedBusiness.id,selectedServices.map(service=>service.id),selectedDate,staffId)).slots;
+          : (await getTimelineAvailability(selectedBusiness.id,selectedServices.map(service=>service.id),selectedDate,staffId,restaurantBooking?{partySize}:{})).slots;
         if(scope!==currentSlotScope.current)return;
         setSlots(fresh);
         const selected=fresh.find(candidate=>candidate.isAvailable&&!candidate.isBlocked
@@ -848,7 +856,8 @@ export function BookingSearchOverlay({
         startDatetime: slot.startDatetime,
         endDatetime: slot.endDatetime,
         unitsReserved: 1,
-        peopleCount: 1,
+        peopleCount: partySize,
+        ...(restaurantBooking ? { restaurantPartySize: partySize } : {}),
       });
       if (scope !== currentSlotScope.current) {
         if (result.ok) await cancelSelectedBooking(result.booking.id).catch(() => {});
@@ -879,7 +888,7 @@ export function BookingSearchOverlay({
         const staffId=proposalReview.selection.staffId;
         const fresh=demoRepository
           ? await demoRepository.getAllSlots(selectedBusiness.id,selectedItem.id,selectedDate,staffId,selectedServices.map(service=>service.id))
-          : (await getTimelineAvailability(selectedBusiness.id,selectedServices.map(service=>service.id),selectedDate,staffId)).slots;
+          : (await getTimelineAvailability(selectedBusiness.id,selectedServices.map(service=>service.id),selectedDate,staffId,restaurantBooking?{partySize}:{})).slots;
         if(scope!==currentSlotScope.current)return;
         const slot=proposalReview.slot;
         if(!fresh.some(candidate=>candidate.isAvailable&&!candidate.isBlocked
@@ -1492,6 +1501,13 @@ export function BookingSearchOverlay({
               <View style={s.stepWrap}>
                 {changeSelection && !!slotError && <Text accessibilityRole="alert" style={s.emptyText}>{slotError}</Text>}
                 {!compactServices && <BreadcrumbStrip business={selectedBusiness} item={null} accentColor={accentColor} />}
+                {restaurantBooking && <View style={{ marginHorizontal: 16, marginBottom: 10, gap: 5 }}>
+                  <Text style={[s.serviceTitle, { color: accentColor }]}>{lang === "en" ? "Diners" : "Comensales"}</Text>
+                  <TextInput testID="restaurant-party-size" accessibilityLabel={lang === "en" ? "Number of diners" : "Número de comensales"}
+                    keyboardType="number-pad" value={String(changeSelection?.peopleCount ?? partyText)} editable={!changeSelection}
+                    onChangeText={setPartyText} maxLength={2} style={[s.serviceCard, { color: "#FFFFFF", minHeight: 44 }]}/>
+                  {!validPartySize && <Text accessibilityRole="alert" style={s.emptyText}>{lang === "en" ? "Enter 1 to 40 diners." : "Indica entre 1 y 40 comensales."}</Text>}
+                </View>}
                 <CatalogPhotoToggle showPhotos={showPhotos} choose={choosePhotoView} ready={photoPreferenceReady} />
                 {items.length === 0 ? (
                   <View style={s.emptyWrap}>
@@ -1865,6 +1881,12 @@ export function BookingSearchOverlay({
                       <Text style={[s.summaryBizLabel, { color: accentColor }]}>
                         {selectedBusiness.name}
                       </Text>
+                      {restaurantBooking && <View style={s.summaryRow} testID="restaurant-review-party-size">
+                        <Feather name="users" size={15} color="#FFFFFF" />
+                        <Text style={[s.summaryRowText, { color: "#FFFFFF" }]}>
+                          {partySize} {lang === "en" ? (partySize === 1 ? "diner" : "diners") : (partySize === 1 ? "comensal" : "comensales")}
+                        </Text>
+                      </View>}
                       {!simpleHairConfirmation && <Text style={s.summaryServiceName}>{trSector(summaryItem!.title, lang)}</Text>}
                       {reviewedQuote && <CatalogQuoteBreakdown quote={reviewedQuote} showTotal={!simpleHairConfirmation} individual={simpleHairConfirmation} accentColor={accentColor} />}
                       {simpleHairConfirmation && !reviewedQuote && <View testID="booking-review-service-lines" style={{ gap: 4 }}>

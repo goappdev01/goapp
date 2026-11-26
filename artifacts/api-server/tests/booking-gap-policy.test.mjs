@@ -52,6 +52,27 @@ test('timeline and catalog creation handlers fail closed on old SQL, without lis
   const f=fixture(),res=f.response();await f.route(file,'post',route)(f.request(body,''),res);assert.equal(res.statusCode,401);assert.equal(f.calls.length,0);
  }
 });
+test('restaurant party size reaches only the dedicated capacity RPCs',async()=>{
+ const business='11111111-1111-4111-8111-111111111111';
+ const service='22222222-2222-4222-8222-222222222222';
+ const f=fixture();
+ const availability=f.request();availability.query={business_id:business,service_ids:service,dateISO:'2035-01-08',party_size:'4'};
+ let res=f.response();await f.route('bookingTimeline','get','/booking-availability')(availability,res);
+ assert.equal(res.statusCode,200);assert.match(f.calls.at(-1).url,/go_restaurant_availability$/);
+ assert.equal(JSON.parse(f.calls.at(-1).init.body).p_party_size,4);
+ const booking={business_id:business,service_ids:[service],starts_at:'2035-01-08T10:00:00Z',request_key:'restaurant',party_size:4};
+ res=f.response();await f.route('bookingTimeline','post','/bookings/timeline')(f.request(booking),res);
+ assert.equal(res.statusCode,201);assert.match(f.calls.at(-1).url,/go_create_restaurant_timeline_booking$/);
+ assert.equal(JSON.parse(f.calls.at(-1).init.body).p_party_size,4);
+ const catalog={business_id:business,root_ids:[service],selected_ids:[],starts_at:'2035-01-08T10:00:00Z',request_key:'restaurant',expected_quote:{},party_size:4};
+ res=f.response();await f.route('catalogAssociations','post','/bookings/catalog')(f.request(catalog),res);
+ assert.equal(res.statusCode,201);assert.match(f.calls.at(-1).url,/go_create_restaurant_catalog_booking$/);
+ assert.equal(JSON.parse(f.calls.at(-1).init.body).p_party_size,4);
+ for(const bad of [0,41,1.5,'4']){
+  const before=f.calls.length;res=f.response();await f.route('catalogAssociations','post','/bookings/catalog')(f.request({...catalog,party_size:bad}),res);
+  assert.equal(res.statusCode,400);assert.equal(f.calls.length,before);
+ }
+});
 test('negotiation requires gap authority for all time-changing decisions, while cancel/reject remain available',async()=>{
  for(const operation of ['propose','counter','accept','confirm','cancel','reject']){
   const f=fixture(0),res=f.response();await f.route('bookingNegotiation','post','/bookings/:bookingId/change')(f.request({operation,expectedRevision:0,dateISO:'2035-01-08',time:'10:00'}),res);

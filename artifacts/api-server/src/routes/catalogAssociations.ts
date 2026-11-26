@@ -19,9 +19,12 @@ async function call(req: Request, res: Response, rpc: string, args: object, crea
       : /^PT(400|403|404|409|422)$/.test(value?.code ?? "") ? Number(value!.code!.slice(2)) : response.status >= 500 ? 503 : 400;
     const discounts = rpc.startsWith("go_booking_discount");
     const reason = value?.message ?? "";
-    res.status(status).json({ code: missing ? (discounts ? "BOOKING_DISCOUNTS_UNAVAILABLE" : "CATALOG_ASSOCIATIONS_UNAVAILABLE")
-      : /^(CATALOG|BOOKING_DISCOUNT)_[A-Z_]+$/.test(reason) ? reason : "CATALOG_OPERATION_FAILED",
+    res.status(status).json({ code: missing ? (rpc.startsWith("go_create_restaurant") ? "RESTAURANT_BOOKING_UNAVAILABLE" : discounts ? "BOOKING_DISCOUNTS_UNAVAILABLE" : "CATALOG_ASSOCIATIONS_UNAVAILABLE")
+      : /^(CATALOG|BOOKING_DISCOUNT|RESTAURANT)_[A-Z_]+$/.test(reason) ? reason : "CATALOG_OPERATION_FAILED",
       error: reason === "BOOKING_DISCOUNT_OVERLAP" ? "Ya hay una promoción activa para alguno de esos servicios en esta franja."
+        : reason === "RESTAURANT_TABLES_UNCONFIGURED" ? "El restaurante todavía no ha configurado sus mesas para reservas reales."
+        : reason === "RESTAURANT_CAPACITY_UNAVAILABLE" ? "No hay mesa ni aforo disponible para ese número de comensales."
+        : reason === "RESTAURANT_PARTY_REQUIRED" ? "Indica el número de comensales antes de reservar."
         : reason === "CATALOG_QUOTE_STALE" ? "El precio ha cambiado. Vuelve a elegir el horario y revisa el nuevo total."
         : missing && discounts ? "Los descuentos aún no están disponibles en el servidor."
         : reason === "BOOKING_DISCOUNT_ACTIVITY_FORBIDDEN" ? "Esta actividad no admite promociones de GO Peluquerías."
@@ -81,18 +84,21 @@ router.post("/booking-discounts/quote", async (req, res) => {
 });
 router.post("/bookings/catalog", async (req, res) => {
   const b = req.body;
+  const restaurant = b?.party_size !== undefined;
   if (!object(b) || !id(b.business_id) || !ids(b.root_ids, 1) || b.root_ids.length > 32 || !ids(b.selected_ids)
+    || restaurant && (typeof b.party_size !== "number" || !Number.isInteger(b.party_size) || b.party_size < 1 || b.party_size > 40)
     || typeof b.request_key !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(b.request_key)
     || !object(b.expected_quote) || b.expected_plan != null && !object(b.expected_plan)
     || b.staff_id != null && !id(b.staff_id) || b.customer_id != null && !id(b.customer_id)
     || typeof b.starts_at !== "string" || !/(Z|[+-]\d{2}:\d{2})$/.test(b.starts_at) || !Number.isFinite(Date.parse(b.starts_at)) || Date.parse(b.starts_at) % 60000 !== 0
     || b.ends_at != null && (typeof b.ends_at !== "string" || !Number.isFinite(Date.parse(b.ends_at)))
     || b.notes != null && (typeof b.notes !== "string" || b.notes.length > 4000)
-    || Object.keys(b).some(k => !["business_id", "root_ids", "selected_ids", "starts_at", "staff_id", "customer_id", "request_key", "expected_quote", "expected_plan", "ends_at", "notes"].includes(k))) {
+    || Object.keys(b).some(k => !["business_id", "root_ids", "selected_ids", "starts_at", "staff_id", "customer_id", "request_key", "expected_quote", "expected_plan", "ends_at", "notes", "party_size"].includes(k))) {
     res.status(400).json({ error: "Reserva inválida." }); return;
   }
-  await call(req, res, "go_create_catalog_booking", { p_business_id: b.business_id, p_root_ids: b.root_ids, p_selected_ids: b.selected_ids,
+  await call(req, res, restaurant ? "go_create_restaurant_catalog_booking" : "go_create_catalog_booking", { p_business_id: b.business_id, p_root_ids: b.root_ids, p_selected_ids: b.selected_ids,
     p_starts_at: b.starts_at, p_staff_id: b.staff_id ?? null, p_customer_id: b.customer_id ?? null, p_request_key: b.request_key,
-    p_expected_quote: b.expected_quote, p_expected_plan: b.expected_plan ?? null, p_expected_end: b.ends_at ?? null, p_notes: b.notes ?? null }, true);
+    p_expected_quote: b.expected_quote, p_expected_plan: b.expected_plan ?? null, p_expected_end: b.ends_at ?? null, p_notes: b.notes ?? null,
+    ...(restaurant ? { p_party_size: b.party_size } : {}) }, true);
 });
 export default router;
