@@ -1,7 +1,7 @@
 import type { TaskScope, ReminderTask } from "./goTaskReminders";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import {
-  goActionSchema, goPlanSchema, parseGoPlan, normalizeBookingText, normalizeListName,
+  goActionSchema, goPlanSchema, goContextSchema, parseGoPlan, normalizeBookingText, normalizeListName,
   type GoAction, type GoContext, type GoPlan,
 } from "@workspace/api-zod";
 import { getAuthenticatedUserId } from "@/data/booking";
@@ -14,7 +14,8 @@ export async function interpretGoActions(text: string, context: GoContext, useAI
   const today = localToday();
   if (useAI && await getAuthenticatedUserId()) {
     try {
-      const result = await assistantApi<{ plan: unknown }>("/plan", { text, today, context });
+      const reviewedContext=goContextSchema.parse(context);
+      const result = await assistantApi<{ plan: unknown }>("/plan", { text, today, context:reviewedContext });
       return goPlanSchema.parse(result.plan);
     } catch { /* Same conservative, explicit-field fallback for voice and text. */ }
   }

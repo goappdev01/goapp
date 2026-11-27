@@ -375,6 +375,9 @@ export function BookingAssistantScreen({
                 ? previous : { height, messages: conversationMessages.length });
             }}>
             {consultation?.controls}
+            {!consultation&&<Text testID="go-ai-processing-notice" style={s.caption}>
+              Asistente de IA GO. La interpretación avanzada utiliza OpenAI cuando está disponible. {Platform.OS==="web"?"El dictado depende del servicio de voz de tu navegador.":"El dictado envía el audio necesario a OpenAI a través de GO."} Revisa las propuestas antes de confirmar; puedes continuar por texto.
+            </Text>}
             {conversationMessages.map((message) => (
               <View
                 key={message.id}

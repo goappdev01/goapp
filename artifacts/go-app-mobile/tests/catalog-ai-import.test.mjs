@@ -5,12 +5,13 @@ import path from 'node:path';
 
 const require = createRequire(path.join(process.cwd(), 'package.json'));
 const { evaluate } = require('./tests/helpers/react-lifecycle.cjs');
+const privacy = evaluate('../../lib/api-zod/src/privacy-controls.ts');
 const business = '11111111-1111-4111-8111-111111111111';
 
 test('GO AI draft requires consent and server capability before any interpretation request', async () => {
   let available = false;
   const calls = [];
-  const data = evaluate('data/catalogImport.ts', { './booking': {
+  const data = evaluate('data/catalogImport.ts', { '@workspace/api-zod': privacy, './booking': {
     getAuthenticatedUserId: async () => 'owner', isCloudId: id => id === business,
     supabaseApiRequest: async (url, options) => {
       calls.push({ url, options });

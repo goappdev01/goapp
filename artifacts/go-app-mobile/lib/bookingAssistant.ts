@@ -123,7 +123,7 @@ export async function interpretRequest(
     try {
       const result = await assistantApi<{ request: unknown }>("/interpret", {
         text,
-        context,
+        context: bookingRequestSchema.parse(context),
         awaiting,
         today,
       });

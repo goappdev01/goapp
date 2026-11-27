@@ -1,4 +1,5 @@
 import { getAuthenticatedUserId, isCloudId, supabaseApiRequest } from "./booking";
+import { projectAllowedFields } from "@workspace/api-zod";
 
 export type CatalogImportCandidate = { name: string; price: number | null; duration: number | null; description: string; category?: string; variant?: string; needsReview?: boolean };
 export type CatalogImportService = { name: string; price: number; duration: number; capacity: 1; description: string; kind?: "service" | "product"; category?: string; variant?: string };
@@ -47,7 +48,7 @@ export async function interpretCatalogWithGoAi(businessId: string, text: string,
   if (!capabilities.goAi) throw new Error("La interpretación de catálogos con GO IA aún no está disponible. No se ha enviado nada.");
   const result = await supabaseApiRequest<{ ok: boolean; services: CatalogImportCandidate[] }>(
     `/supabase/manage/businesses/${businessId}/catalog-import/ai/interpret`,
-    { method: "POST", body: JSON.stringify({ text: message, ...(file ?? {}), consent: true }) }, true, user);
+    { method: "POST", body: JSON.stringify({ text: message, ...(file ? projectAllowedFields(file,["source","mime","content_base64"]) : {}), consent: true }) }, true, user);
   if (result?.ok !== true || !Array.isArray(result.services)) throw new Error("GO IA no ha devuelto un catálogo revisable. No se guardó nada.");
   return result.services;
 }

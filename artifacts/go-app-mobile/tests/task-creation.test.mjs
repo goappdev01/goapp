@@ -121,6 +121,16 @@ export function fixture(initial = [], userId = null) {
   return { store, personal, management, reminders, user(value) { userId = value; }, screen, ...s, get notice() { return s.notice; }, get saved() { return JSON.parse(raw); },
     get writes() { return writes; }, fail(value) { fail = value; }, reopenStore: newStore };
 }
+test("unreviewed context never reaches remote personal-action interpretation", async () => {
+  const calls=[];
+  const personal=load("lib/goPersonalActions.ts",{
+    "@workspace/api-zod":model,"@/data/booking":{getAuthenticatedUserId:async()=>"owner"},
+    "./bookingAssistant":{localToday:()=>"2026-10-08",assistantApi:async(...args)=>{calls.push(args);throw Error("unexpected transmission");}},
+    "./goLogBridge":{},"./goTaskAccess":{},"./time":{},
+  });
+  await personal.interpretGoActions("Crea una tarea para mañana",{...model.emptyGoContext(),contacts:["private"]},true);
+  assert.equal(calls.length,0);
+});
 test("dated spoken task uses the manual task record and real calendar day filter", async () => {
   const f = fixture();
   await f.render().dispatch("GO, recuérdame llamar a Nelson mañana a las diez de la mañana", false);

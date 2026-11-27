@@ -1,0 +1,605 @@
+{
+  "version": "2026-11-27.1",
+  "baseSha": "f8a7b66ef2a9501515e096ad2464a4e3b462ea63",
+  "checkedAt": "2026-11-27",
+  "legalConclusion": "not-audited",
+  "legalBasisStatus": "pending-human-validation-per-processing-purpose",
+  "audienceStatus": "No se ha acreditado un sistema transversal de edad o condición de vulnerabilidad. No inferirlas ni presumir que todas las cuentas son adultas.",
+  "modules": [
+    {
+      "id": "identity",
+      "purpose": "Identidad, perfiles, membresías y verificación empresarial",
+      "evidence": [
+        "artifacts/api-server/src/routes/supabase.ts",
+        "artifacts/api-server/src/routes/admin.ts",
+        "artifacts/api-server/src/middleware/requireAdmin.ts"
+      ],
+      "data": [
+        "identificadores",
+        "contacto",
+        "sesión",
+        "documentación de empresa"
+      ],
+      "recipients": [
+        "GO API",
+        "proveedor de identidad existente"
+      ],
+      "aiAssessment": "No se ha identificado aquí un evaluador IA de identidad; confirmar el uso real.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "legal-validation"
+      ],
+      "existing": [
+        "JWT y membresía ADMIN viva en servidor"
+      ],
+      "added": [],
+      "pending": [
+        "Responsables, encargados, avisos y derechos verificables",
+        "Registro de actividades y conservación",
+        "Necesidad de delegado y tratamiento de menores"
+      ]
+    },
+    {
+      "id": "central-ai",
+      "purpose": "Conversación general, texto y voz",
+      "evidence": [
+        "artifacts/api-server/src/routes/central-assistant.ts",
+        "artifacts/go-app-mobile/components/booking-assistant/CentralAssistant.tsx",
+        "artifacts/go-app-mobile/lib/centralConversation.ts"
+      ],
+      "data": [
+        "mensajes elegidos",
+        "audio bajo acción",
+        "historial optativo"
+      ],
+      "recipients": [
+        "GO API",
+        "OpenAI si se habilita"
+      ],
+      "aiAssessment": "Candidato a transparencia del art. 50; determinar rol GO proveedor/desplegador y finalidad, no clasificar por el mero uso de un LLM.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "impact-assessment",
+        "ai-literacy-prohibitions",
+        "ai-transparency",
+        "ai-december-transition",
+        "agents-practices",
+        "legal-validation"
+      ],
+      "existing": [
+        "ADMIN cliente/servidor",
+        "consentimiento por sesión",
+        "store:false",
+        "historial local optativo",
+        "interrupción y límites de contexto"
+      ],
+      "added": [],
+      "pending": [
+        "Checkpoint c6141e1 preservado, NO integrado ni activado aquí",
+        "Base, contratos, transferencias y retención del proveedor",
+        "Acreditar controles de gasto y prueba real en su tarjeta"
+      ]
+    },
+    {
+      "id": "booking-ai",
+      "purpose": "Interpretar reservas, tareas y actividades solicitadas",
+      "evidence": [
+        "artifacts/api-server/src/routes/booking-assistant.ts",
+        "artifacts/go-app-mobile/lib/bookingAssistant.ts",
+        "artifacts/go-app-mobile/lib/goPersonalActions.ts",
+        "artifacts/go-app-mobile/components/booking-assistant/BookingAssistantScreen.tsx"
+      ],
+      "data": [
+        "solicitud explícita",
+        "contexto acotado de borrador",
+        "audio"
+      ],
+      "recipients": [
+        "GO API",
+        "OpenAI o voz del navegador según modo"
+      ],
+      "aiAssessment": "Asistencia e interpretación; no equivale por sí sola a decisión del art. 22 ni alto riesgo. Revisar usos que afecten significativamente a personas.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "impact-assessment",
+        "ai-literacy-prohibitions",
+        "ai-transparency",
+        "agents-practices",
+        "legal-validation"
+      ],
+      "existing": [
+        "esquemas estrictos",
+        "motor local alternativo",
+        "propuestas revisables",
+        "confirmación de reservas"
+      ],
+      "added": [
+        "validación de contexto antes del envío",
+        "aviso visible de IA y proveedor"
+      ],
+      "pending": [
+        "Base y controles de transmisión explícitos por finalidad de interpretación/voz",
+        "Revisar nota preparada y otros puntos de entrada sin aviso completo",
+        "Revisar diagnósticos con datos y conservación antes de ampliar agentes"
+      ]
+    },
+    {
+      "id": "reservations",
+      "purpose": "Catálogo, disponibilidad, solicitud, cambios, cancelación y agenda",
+      "evidence": [
+        "artifacts/api-server/src/routes/bookingTimeline.ts",
+        "artifacts/api-server/src/routes/bookingNegotiation.ts",
+        "artifacts/api-server/src/routes/bookingCalendar.ts",
+        "artifacts/api-server/src/routes/bookingVerification.ts",
+        "artifacts/api-server/src/routes/catalogAssociations.ts"
+      ],
+      "data": [
+        "participantes",
+        "servicios",
+        "fecha y hora",
+        "mensajes de reserva"
+      ],
+      "recipients": [
+        "GO API",
+        "establecimiento y participantes autorizados"
+      ],
+      "aiAssessment": "Motor determinista con revisión; reexaminar si decide elegibilidad, salud, trabajo u otros efectos significativos.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "impact-assessment",
+        "legal-validation"
+      ],
+      "existing": [
+        "validación en servidor",
+        "confirmaciones y revisiones",
+        "idempotencia y reglas de estado"
+      ],
+      "added": [],
+      "pending": [
+        "Base por finalidad: ejecución de reserva frente a marketing",
+        "Información a participantes, derechos y conservación",
+        "Normativa sectorial si se habilita salud, empleo o servicios regulados"
+      ]
+    },
+    {
+      "id": "shopping",
+      "purpose": "Listas, productos, favoritos y compartición elegida",
+      "evidence": [
+        "artifacts/api-server/src/routes/shopping.ts",
+        "artifacts/go-app-mobile/components/notes/GoShoppingNote.tsx"
+      ],
+      "data": [
+        "listas",
+        "productos",
+        "precios",
+        "preferencias"
+      ],
+      "recipients": [
+        "almacén local o API según flujo",
+        "destinatario y hoja de compartir elegidos"
+      ],
+      "aiAssessment": "Separar extracción de intención de cualquier compra o pago; no habilitar ejecución automática.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "agents-practices",
+        "legal-validation"
+      ],
+      "existing": [
+        "listas por contexto",
+        "compartición voluntaria",
+        "selección y totales"
+      ],
+      "added": [],
+      "pending": [
+        "Incidencia de listas ADMIN sigue independiente y no resuelta por esta tarjeta",
+        "Plazos, exportación y eliminación con garantías",
+        "No inferir salud o solvencia a partir de compras"
+      ]
+    },
+    {
+      "id": "notes",
+      "purpose": "Notas, tareas, recordatorios y archivos",
+      "evidence": [
+        "artifacts/go-app-mobile/lib/unifiedNoteStore.ts",
+        "artifacts/go-app-mobile/lib/goNotePreparation.ts"
+      ],
+      "data": [
+        "texto libre",
+        "adjuntos elegidos",
+        "plazos"
+      ],
+      "recipients": [
+        "almacenamiento existente",
+        "interpretación remota si se solicita en el flujo"
+      ],
+      "aiAssessment": "Texto puede contener datos de terceros o especiales: ni una nota completa ni su historial son contexto por defecto.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "impact-assessment",
+        "agents-practices",
+        "legal-validation"
+      ],
+      "existing": [
+        "preparación separada del guardado",
+        "archivos temporales y borradores"
+      ],
+      "added": [
+        "minimización del contexto compartido del planificador"
+      ],
+      "pending": [
+        "Avisos y base en cada entrada a interpretación",
+        "Retención de notas, borradores y archivos",
+        "Revisión de datos especiales y acceso de terceros"
+      ]
+    },
+    {
+      "id": "communication",
+      "purpose": "Mensajería contextual y contactos",
+      "evidence": [
+        "artifacts/go-app-mobile/components/GOChatScreen.tsx",
+        "docs/booking-entry-details-v1.md"
+      ],
+      "data": [
+        "mensajes",
+        "contactos",
+        "ubicación elegida"
+      ],
+      "recipients": [
+        "participantes elegidos",
+        "proveedor de canal correspondiente"
+      ],
+      "aiAssessment": "Distinguir chat persona-persona y consulta IA; no transferir el primero al segundo automáticamente.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "agents-practices",
+        "legal-validation"
+      ],
+      "existing": [
+        "navegación contextual y participante explícito"
+      ],
+      "added": [],
+      "pending": [
+        "Inventario de canales/proveedores y conservación",
+        "Información, destinatarios y contactos ajenos",
+        "Contenido externo no puede conceder permiso de envío"
+      ]
+    },
+    {
+      "id": "location",
+      "purpose": "Ubicación puntual, meteorología, TAXI y transporte público",
+      "evidence": [
+        "artifacts/go-app-mobile/lib/locationAccess.ts",
+        "artifacts/go-app-mobile/lib/deviceLocation.ts",
+        "artifacts/go-app-mobile/data/localTransport.ts",
+        "artifacts/go-app-mobile/hooks/useWeatherContext.ts"
+      ],
+      "data": [
+        "localidad elegida",
+        "posición puntual según precisión del dispositivo"
+      ],
+      "recipients": [
+        "geocodificación y meteorología existentes",
+        "operador o búsqueda externa cuando el usuario la abre"
+      ],
+      "aiAssessment": "No se ha visto seguimiento continuo en el mecanismo común; permiso OS no equivale a base jurídica ni a permiso de compartir con terceros.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "impact-assessment",
+        "legal-validation"
+      ],
+      "existing": [
+        "solo primer plano y bajo necesidad",
+        "remediación nativa y alternativa manual",
+        "resolución de transporte por localidad",
+        "coordenadas meteorológicas redondeadas"
+      ],
+      "added": [],
+      "pending": [
+        "Revisar información/base/transferencias de cada proveedor",
+        "Probar precisión aproximada y revocación en dispositivo",
+        "No ampliar autorizaciones de compartir"
+      ]
+    },
+    {
+      "id": "catalog",
+      "purpose": "Catálogos de empresa, URL y archivos elegidos",
+      "evidence": [
+        "artifacts/api-server/src/routes/management.ts",
+        "artifacts/go-app-mobile/data/catalogImport.ts"
+      ],
+      "data": [
+        "servicios y productos",
+        "documento elegido",
+        "posibles datos incidentales"
+      ],
+      "recipients": [
+        "GO API y mecanismos de extracción existentes"
+      ],
+      "aiAssessment": "GO IA catálogo se anuncia no disponible; esta tarjeta no activa OCR/IA ni proveedores.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "impact-assessment",
+        "agents-practices",
+        "legal-validation"
+      ],
+      "existing": [
+        "titularidad empresarial",
+        "capacidad y consentimiento separados",
+        "revisión antes de importar"
+      ],
+      "added": [
+        "proyección de campos del archivo seleccionado"
+      ],
+      "pending": [
+        "Revisión informada y minimización documental antes de IA real",
+        "Retención temporal y contratos de extracción",
+        "No asumir que documento público carece de datos personales"
+      ]
+    },
+    {
+      "id": "support",
+      "purpose": "Ayuda, incidencias, adjuntos y equipo de soporte",
+      "evidence": [
+        "artifacts/api-server/src/routes/support.ts",
+        "artifacts/go-app-mobile/lib/supportRequests.ts",
+        "artifacts/go-app-mobile/data/supportGateway.ts"
+      ],
+      "data": [
+        "consulta",
+        "adjuntos",
+        "historial de atención"
+      ],
+      "recipients": [
+        "equipo autorizado de soporte y API"
+      ],
+      "aiAssessment": "Soporte humano y consulta IA son finalidades diferentes; no transmitir tickets a IA sin revisión.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "legal-validation"
+      ],
+      "existing": [
+        "JWT por identidad",
+        "adjuntos privados",
+        "confirmación de recepción",
+        "eventos y retención del servicio",
+        "payload explícito de campos ya existente"
+      ],
+      "added": [],
+      "pending": [
+        "Base, acceso del equipo y calendario de conservación",
+        "Verificar derechos y eliminación en copias/proveedores",
+        "No considerar los eventos existentes prueba de cumplimiento legal"
+      ]
+    },
+    {
+      "id": "finance",
+      "purpose": "Planes y cálculos financieros de GO",
+      "evidence": [
+        "artifacts/api-server/src/routes/financial-plans.ts",
+        "artifacts/go-app-mobile/components/financial/FinancialPlanScreen.tsx"
+      ],
+      "data": [
+        "previsiones",
+        "importes",
+        "fuentes empresariales"
+      ],
+      "recipients": [
+        "GO API según autorización"
+      ],
+      "aiAssessment": "No se acredita scoring ni concesión de crédito; si se introduce, revisar anexo III y art. 22 antes de activarlo.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "impact-assessment",
+        "ai-annex-iii",
+        "legal-validation"
+      ],
+      "existing": [
+        "controles ADMIN y planes existentes"
+      ],
+      "added": [],
+      "pending": [
+        "Finalidad, fuentes, roles y conservación",
+        "No enviar balances/documentos a agentes por defecto",
+        "Revisión sectorial antes de asesoramiento o scoring"
+      ]
+    },
+    {
+      "id": "boards",
+      "purpose": "Tableros y coordinación de equipos",
+      "evidence": [
+        "artifacts/api-server/src/routes/boards.ts",
+        "artifacts/go-app-mobile/components/boards/GoBoardsPanel.tsx"
+      ],
+      "data": [
+        "miembros",
+        "tareas",
+        "asignaciones"
+      ],
+      "recipients": [
+        "miembros autorizados"
+      ],
+      "aiAssessment": "No clasificar como alto riesgo por existir un tablero. Evaluación/asignación laboral automatizada exige revisión específica.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "impact-assessment",
+        "ai-annex-iii",
+        "legal-validation"
+      ],
+      "existing": [
+        "membresías y acceso a tableros"
+      ],
+      "added": [],
+      "pending": [
+        "Separación real entre empresas",
+        "Tratamientos laborales, información a trabajadores y supervisión",
+        "No crear perfiles de rendimiento o vulnerabilidad"
+      ]
+    },
+    {
+      "id": "sports",
+      "purpose": "Eventos y actividades deportivas",
+      "evidence": [
+        "artifacts/api-server/src/routes/sports-events.ts",
+        "artifacts/go-app-mobile/components/sports/SportsEventsAdminPanel.tsx"
+      ],
+      "data": [
+        "eventos",
+        "participación según flujo"
+      ],
+      "recipients": [
+        "usuarios autorizados"
+      ],
+      "aiAssessment": "No se ha acreditado un decisor IA; reexaminar salud, menores y selección automatizada si se añaden.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "impact-assessment",
+        "legal-validation"
+      ],
+      "existing": [
+        "acceso ADMIN del módulo existente"
+      ],
+      "added": [],
+      "pending": [
+        "Participación de menores, representación y publicación de imágenes",
+        "Base y retención de inscripciones"
+      ]
+    },
+    {
+      "id": "commercial",
+      "purpose": "QR, enlaces comerciales y adquisición",
+      "evidence": [
+        "artifacts/api-server/src/routes/commercialQr.ts",
+        "artifacts/api-server/src/routes/modulePublication.ts"
+      ],
+      "data": [
+        "referencias de acceso",
+        "contacto y adquisición según flujo"
+      ],
+      "recipients": [
+        "GO y empresa vinculada"
+      ],
+      "aiAssessment": "Distinguir navegación, medida necesaria y perfilado/marketing; no habilitar seguimiento implícito.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "legal-validation"
+      ],
+      "existing": [
+        "fuentes y capacidades por módulo"
+      ],
+      "added": [],
+      "pending": [
+        "LSSI: información y comunicaciones comerciales",
+        "Analítica/cookies solo según finalidad y excepción aplicable",
+        "Base y conservación de referencias"
+      ]
+    },
+    {
+      "id": "notifications",
+      "purpose": "Avisos locales de tareas y agenda",
+      "evidence": [
+        "artifacts/go-app-mobile/lib/goTaskReminders.ts",
+        "artifacts/go-app-mobile/lib/goTaskReminderRuntime.ts"
+      ],
+      "data": [
+        "título y horario necesarios para el aviso"
+      ],
+      "recipients": [
+        "sistema de notificaciones del dispositivo"
+      ],
+      "aiAssessment": "Programación determinista, no agente autónomo por defecto.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "legal-validation"
+      ],
+      "existing": [
+        "preferencias y permisos nativos",
+        "planificación y cancelación existentes"
+      ],
+      "added": [],
+      "pending": [
+        "Contenido visible en pantalla bloqueada",
+        "Alcance por cuenta y retirada de avisos al cambiar sesión"
+      ]
+    },
+    {
+      "id": "printing",
+      "purpose": "GO Imprimir existente y futura integración",
+      "evidence": [],
+      "data": [
+        "documentos y datos de demo: inventario pendiente en proyecto original"
+      ],
+      "recipients": [
+        "por verificar, no se conecta desde esta tarjeta"
+      ],
+      "aiAssessment": "Proyecto original separado, no reconstruido ni activado aquí.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "legal-validation"
+      ],
+      "existing": [],
+      "added": [],
+      "pending": [
+        "Revisar proyecto y datos recuperados antes de integrarlos",
+        "No transferir documentos de impresión a IA por defecto"
+      ]
+    },
+    {
+      "id": "agents",
+      "purpose": "Herramientas y agentes futuros; operación de desarrollo separada de GO",
+      "evidence": [
+        "lib/api-zod/src/central-assistant.ts",
+        "tools/go-codex-bridge/VALIDATION.md"
+      ],
+      "data": [
+        "solo contexto seleccionado y revisado; nunca cuentas completas por defecto"
+      ],
+      "recipients": [
+        "cada destinatario requiere identificación y revisión"
+      ],
+      "aiAssessment": "Evaluar finalidad y autonomía, no inferir permiso por ser ADMIN. Fábrica y otras tarjetas no se activan.",
+      "requirements": [
+        "data-purpose",
+        "security-scope",
+        "impact-assessment",
+        "ai-literacy-prohibitions",
+        "ai-transparency",
+        "ai-annex-iii",
+        "ai-annex-i",
+        "agents-practices",
+        "legal-validation"
+      ],
+      "existing": [
+        "registro reservado sin ejecutores habilitados en MAIN"
+      ],
+      "added": [
+        "evaluadores reutilizables de divulgación y control humano",
+        "proyección de metadatos de auditoría sin crear telemetría"
+      ],
+      "pending": [
+        "Adaptar cada ejecutor real a permisos y confirmaciones existentes",
+        "Base, alcance, cancelación y reversión antes de habilitar agentes",
+        "Nuevas migraciones o automatizaciones requieren revisión y aprobación"
+      ]
+    }
+  ],
+  "routeExclusions": [
+    "artifacts/api-server/src/routes/health.ts",
+    "artifacts/api-server/src/routes/index.ts"
+  ]
+}
