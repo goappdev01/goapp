@@ -11,7 +11,7 @@ export function centralConversationFor(userId:string,locale="es-ES"){
   const state={locale,speechEpoch:0,model:null as unknown as CentralConversation};
   state.model=new CentralConversation(userId,{
     read:key=>AsyncStorage.getItem(key),write:(key,value)=>AsyncStorage.setItem(key,value),remove:key=>AsyncStorage.removeItem(key),
-    respond:(messages,signal)=>centralAssistantApi<CentralReply>(userId,"/respond",{messages,requestId:globalThis.crypto?.randomUUID?.(),consent:true},signal),
+    respond:(messages,signal)=>centralAssistantApi<CentralReply>(userId,"/respond",{messages,requestId:globalThis.crypto?.randomUUID?.(),timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone,consent:true},signal),
     confirm:id=>centralAssistantApi(userId,"/proposal/confirm",{id,confirmed:true,consent:true}),
     cancelProposal:()=>centralAssistantApi(userId,"/proposal/cancel",{consent:true}),
     cloud:{read:()=>centralAssistantApi(userId,"/history"),write:(revision,messages)=>centralAssistantApi(userId,"/history",{consent:true,revision,messages},undefined,"PUT")},

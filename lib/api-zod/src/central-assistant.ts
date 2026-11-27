@@ -1,7 +1,7 @@
 import {z} from "zod";
 
 export const centralMessageSchema=z.object({role:z.enum(["user","assistant"]),text:z.string().trim().min(1).max(4000)}).strict();
-export const centralConversationSchema=z.object({consent:z.literal(true),requestId:z.string().uuid().optional(),messages:z.array(centralMessageSchema).min(1).max(20)})
+export const centralConversationSchema=z.object({consent:z.literal(true),requestId:z.string().uuid().optional(),timeZone:z.string().min(1).max(100).optional(),messages:z.array(centralMessageSchema).min(1).max(20)})
   .strict().refine(body=>body.messages.at(-1)?.role==="user"&&body.messages.reduce((n,m)=>n+m.text.length,0)<=12000,"Contexto demasiado extenso");
 /** A separate, explicit choice is required before storing conversation text across devices. */
 export const centralHistoryWriteSchema=z.object({consent:z.literal(true),revision:z.number().int().min(0),
@@ -18,6 +18,7 @@ export type CentralProposal=z.infer<typeof centralProposalSchema>;
 export type CentralToolRegistration={module:string;name:string;requiresConfirmation:boolean;enabled:boolean};
 export const CENTRAL_AI_TOOLS:readonly CentralToolRegistration[]=Object.freeze([
   {module:"bookings",name:"read_catalog",requiresConfirmation:false,enabled:true},
+  {module:"bookings",name:"read_services",requiresConfirmation:false,enabled:true},
   {module:"bookings",name:"read_availability",requiresConfirmation:false,enabled:true},
   {module:"bookings",name:"prepare_booking",requiresConfirmation:true,enabled:true},
 ]);

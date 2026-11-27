@@ -1,7 +1,7 @@
 import {Alert} from "react-native";
 import type {CentralConversation} from "./centralConversation";
 const pending=new WeakMap<CentralConversation,Promise<void>>();
-export const CENTRAL_PRIVACY_DISCLOSURE="OpenAI recibirá solo los mensajes que escribas o que transcribas localmente para responderte. Evita datos personales innecesarios. No se envía audio a OpenAI ni se solicita guardar sus respuestas; esto no acredita retención cero. Recordar el historial es opcional. Puedes revocar el envío y borrar tus conversaciones en GO → Configuración → Preferencias → Privacidad. Las operaciones que requieran autorización mantienen revisión y confirmación expresa.";
+export const CENTRAL_PRIVACY_DISCLOSURE="OpenAI recibirá los mensajes que escribas o transcribas localmente y la zona horaria del dispositivo para interpretar fechas; no se envían coordenadas. Cuando consultes GO, recibirá solo los resultados necesarios de establecimientos, servicios y disponibilidad. Evita datos personales innecesarios. No se envía audio a OpenAI ni se solicita guardar sus respuestas; esto no acredita retención cero. Recordar el historial es opcional. Puedes revocar el envío y borrar tus conversaciones en GO → Configuración → Preferencias → Privacidad. Las operaciones que requieran autorización mantienen revisión y confirmación expresa.";
 export function requestCentralConsent(model:CentralConversation,isCurrent:()=>boolean){
   if(!model.ready)return Promise.reject(Error("Espera a que se recuperen tus preferencias."));
   if(model.consent)return Promise.resolve();const current=pending.get(model);if(current)return current;

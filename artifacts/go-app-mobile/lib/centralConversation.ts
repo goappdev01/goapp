@@ -16,7 +16,7 @@ export type CentralConversationDependencies={
 };
 export class CentralHistoryConflict extends Error{}
 /** Increment only when a changed disclosure requires a new informed decision. */
-export const CENTRAL_CONSENT_VERSION=1;
+export const CENTRAL_CONSENT_VERSION=2;
 /** Only explicit conversation text is ever transmitted. No GO data/action dispatcher. */
 export class CentralConversation{
   messages:CentralMessage[]=[];consent=false;consentReviewed=false;remember=false;voice=true;busy=false;speaking=false;speechPaused=false;speechMessageIndex:number|null=null;speechError="";completed=false;notice="";ready=false;cloudEnabled=false;

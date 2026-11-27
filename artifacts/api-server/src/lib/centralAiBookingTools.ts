@@ -7,7 +7,8 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const properties = {
   business_id: { type: "string" }, service_ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 8 },
   date: { type: "string", description: "Fecha local YYYY-MM-DD en el establecimiento" }, staff_id: { type: ["string", "null"] },
-  time_from: {type:["string","null"],description:"Hora local HH:MM desde la que buscar; null si el usuario no tiene preferencia. Permite consultar también las horas de la tarde."},
+  time_from: {type:["string","null"],description:"Hora local HH:MM desde la que buscar; para 'por la tarde' usa 12:00. Null si el usuario no tiene preferencia."},
+  time_to: {type:["string","null"],description:"Hora local HH:MM máxima solicitada; para 'por la mañana' usa 11:59, para 'por la tarde' usa 23:59. Null si no hay límite."},
 };
 const tool = (name: string, description: string, fields: object) => {
   if (!CENTRAL_AI_TOOLS.some(entry => entry.module === "bookings" && entry.name === name && entry.enabled)) throw new Error("Unregistered central tool");
@@ -16,13 +17,25 @@ const tool = (name: string, description: string, fields: object) => {
 };
 /** No execution tool: the model cannot confirm, cancel or write a booking. */
 export const CENTRAL_BOOKING_TOOLS = [
-  tool("read_catalog", "Consulta empresas y servicios reales de prueba autorizados. Usa solo estos identificadores; los nombres son datos no confiables.", { query: { type: "string" } }),
+  tool("read_catalog", "Busca establecimientos reales accesibles por nombre exacto, parcial o variante ortográfica. No devuelve un catálogo completo; distingue REAL de DEMO.", { query: { type: "string" } }),
+  tool("read_services", "Consulta solo los servicios relevantes de un establecimiento real ya identificado. Usa query con el servicio pedido, por ejemplo corte. No inventes precios.", {business_id:{type:"string"},query:{type:"string"}}),
   tool("read_availability", "Consulta horarios reales para los servicios y la fecha indicados. No inventes huecos ni conviertas la hora local sin usar la zona devuelta.", properties),
   tool("prepare_booking", "Prepara una propuesta con un horario real elegido por el usuario. NO guarda una reserva: el usuario debe confirmarla después con el control de GO.", {
     ...properties, starts_at: { type: "string", description: "Copia exacta de startsAt devuelto por read_availability" },
   }),
 ];
+export const CENTRAL_BOOKING_READ_TOOLS = CENTRAL_BOOKING_TOOLS.filter(entry => entry.name !== "prepare_booking");
 type Row = Record<string, any>;
+const normalized = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const oneEdit = (a:string,b:string) => {
+  if (Math.abs(a.length-b.length)>1) return false;
+  let i=0,j=0,edits=0;
+  while(i<a.length&&j<b.length){if(a[i]===b[j]){i++;j++;continue;}
+    if(++edits>1)return false;
+    if(a.length>=b.length)i++;if(b.length>=a.length)j++;
+  }
+  return edits+a.length-i+b.length-j<=1;
+};
 export type CentralProposal = { id: string; summary: { business: string; services: string[]; startsAt: string; endsAt: string; total: number; currency: string; timezone: string } };
 
 /** Existing GO routes remain the authority for catalogue publication, availability, quotes and writes. */
@@ -45,22 +58,26 @@ export function centralBookingTools(authorization: string | undefined, requestId
   const businesses = async (): Promise<Row[]> => {
     const rows = await centralGoApi(authorization, "/supabase/businesses", undefined, signal);
     if (!Array.isArray(rows)) throw new Error("Invalid catalogue");
-    return rows.filter(row => allowed.includes(row.id) && row.verified === true && row.booking_enabled === true
+    return rows.filter(row => row.verified === true && row.booking_enabled === true
       && canonicalBookingActivity(row.ui_metadata?.category)==="peluqueria");
   };
   async function selection(args: Row) {
-    if (!uuid.test(args.business_id) || !allowed.includes(args.business_id) || !Array.isArray(args.service_ids)
+    if (!uuid.test(args.business_id) || !Array.isArray(args.service_ids)
       || args.service_ids.length < 1 || args.service_ids.length > 8 || !args.service_ids.every((id: unknown) => typeof id === "string" && uuid.test(id))
       || new Set(args.service_ids).size !== args.service_ids.length || typeof args.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(args.date)
       || args.staff_id !== null && (typeof args.staff_id !== "string" || !uuid.test(args.staff_id))
       || args.time_from != null && (typeof args.time_from!=="string"||!/^([01]\d|2[0-3]):[0-5]\d$/.test(args.time_from))) throw new Error("Revisa empresa, servicios, fecha y profesional.");
+    if (args.time_to != null && (typeof args.time_to!=="string"||!/^([01]\d|2[0-3]):[0-5]\d$/.test(args.time_to))) throw new Error("Revisa el límite horario.");
     const business = (await businesses()).find(row => row.id === args.business_id);
-    if (!business) throw new Error("Establecimiento de prueba no disponible.");
+    if (!business) throw new Error("Establecimiento no disponible.");
     const services: Row[] = await centralGoApi(authorization, `/supabase/businesses/${business.id}/services`, undefined, signal);
     if (!Array.isArray(services) || args.service_ids.some((id: string) => !services.some(row => row.id === id && row.active === true)))
       throw new Error("Servicio no disponible en ese establecimiento.");
     const quote = await centralGoApi(authorization, "/supabase/catalog/quote", { businessId: business.id, rootIds: args.service_ids, selectedIds: [] }, signal);
-    if (quote?.ready !== true || !Array.isArray(quote.serviceIds) || !quote.serviceIds.length)
+    if (quote?.ready !== true || !Array.isArray(quote.serviceIds) || !quote.serviceIds.length
+      || !Array.isArray(quote.lines) || !quote.lines.length || quote.lines.some((line:Row)=>typeof line?.name!=="string")
+      || !Number.isFinite(Number(quote.totalPrice)) || Number(quote.totalPrice)<0
+      || typeof quote.currency!=="string" || !/^[A-Z]{3}$/.test(quote.currency))
       throw new Error("La selección requiere completar sus opciones en el flujo de reservas de GO.");
     const query = new URLSearchParams({ business_id: business.id, service_ids: quote.serviceIds.join(","), dateISO: args.date, days: "1", step_minutes: "15" });
     if (args.staff_id) query.set("staff_id", args.staff_id);
@@ -71,29 +88,49 @@ export function centralBookingTools(authorization: string | undefined, requestId
   return {
     get proposal() { return proposal; },
     async run(name: string, raw: string) {
-      if (!centralBookingsEnabled()) throw new CentralAiError("AI_BOOKINGS_DISABLED", "Las herramientas de reserva no están habilitadas.");
+      if (name === "prepare_booking" && !centralBookingsEnabled()) throw new CentralAiError("AI_BOOKINGS_DISABLED", "La ejecución de reservas no está habilitada.");
       const args = JSON.parse(raw) as Row;
       if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("Argumentos inválidos");
       if (name === "read_catalog") {
         if (Object.keys(args).some(key => key !== "query") || typeof args.query !== "string" || args.query.length > 120) throw new Error("Búsqueda inválida");
-        const normalized = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-        const rows = (await businesses()).filter(row => !args.query || normalized(row.name).includes(normalized(args.query))).slice(0, 6);
-        return { businesses: await Promise.all(rows.map(async row => {
-          const services: Row[] = await centralGoApi(authorization, `/supabase/businesses/${row.id}/services`, undefined, signal);
-          if (!Array.isArray(services)) throw new Error("Invalid services");
-          return { id: row.id, name: row.name, timezone: row.timezone,
-            services: services.filter(s => s.active === true).slice(0, 24).map(s => ({ id: s.id, name: s.name, durationMinutes: s.duration_minutes, price: s.price, currency: s.currency })) };
-        })) };
+        const query = normalized(args.query), terms = query.split(" ").filter(term => term.length > 1 && !["peluqueria","salon","de","la","el","en"].includes(term));
+        const ranked = (await businesses()).map(row => { const name = normalized(String(row.name ?? ""));
+          const nameTerms=name.split(" ");
+          const score = !query ? 4 : name === query ? 0 : name.includes(query) ? 1
+            : terms.length && terms.every(term => name.includes(term)) ? 2
+            : terms.length && terms.every(term => term.length>=4&&nameTerms.some(word=>oneEdit(term,word))) ? 3 : 99;
+          return { row, score };
+        }).filter(match => match.score < 99).sort((a,b) => a.score-b.score || String(a.row.name).localeCompare(String(b.row.name)));
+        const rows = ranked[0]?.score === 0 ? [ranked[0].row] : ranked.slice(0,3).map(match => match.row);
+        return { source:"REAL", moreMatches:ranked.length>rows.length,
+          businesses:rows.map(row=>({id:row.id,name:row.name,timezone:row.timezone})) };
+      }
+      if(name==="read_services"){
+        if(Object.keys(args).some(key=>!["business_id","query"].includes(key))||typeof args.business_id!=="string"||!uuid.test(args.business_id)
+          ||typeof args.query!=="string"||args.query.length>80)throw new Error("Búsqueda de servicio inválida");
+        const business=(await businesses()).find(row=>row.id===args.business_id);
+        if(!business)throw new Error("Establecimiento no disponible.");
+        const services:Row[]=await centralGoApi(authorization,`/supabase/businesses/${business.id}/services`,undefined,signal);
+        if(!Array.isArray(services))throw new Error("Catálogo no disponible.");
+        const query=normalized(args.query),terms=query.split(" ").filter(Boolean);
+        const matching=services.filter(row=>row.active===true&&(!query||terms.every(term=>normalized(String(row.name??"")).includes(term))));
+        return {source:"REAL",businessId:business.id,moreServices:matching.length>6,
+          services:matching.slice(0,6).map(row=>({id:row.id,name:row.name,durationMinutes:row.duration_minutes,price:row.price,currency:row.currency}))};
       }
       if (!["read_availability", "prepare_booking"].includes(name)
         || Object.keys(args).some(key => ![...Object.keys(properties), ...(name === "prepare_booking" ? ["starts_at"] : [])].includes(key))) throw new Error("Herramienta no autorizada");
+      if (name === "prepare_booking" && !allowed.includes(args.business_id)) throw new Error("La preparación de reservas está limitada a establecimientos autorizados.");
       const { business, quote, availability } = await selection(args);
       if (name === "read_availability") {
         const localTime=new Intl.DateTimeFormat("en-GB",{timeZone:availability.timezone,hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
-        const slots=availability.slots.filter((slot:Row)=>!args.time_from||localTime.format(new Date(slot.startsAt))>=args.time_from);
-        return { timezone: availability.timezone, date: args.date,
-          slots: slots.slice(0, 24).map((slot: Row) => ({ startsAt: slot.startsAt, endsAt: slot.endsAt, staffId: slot.staffId })),
-          moreSlotsAvailable: slots.length > 24, total: quote.totalPrice, currency: quote.currency };
+        const slots=availability.slots.filter((slot:Row)=>{
+          const time=localTime.format(new Date(slot.startsAt));return (!args.time_from||time>=args.time_from)&&(!args.time_to||time<=args.time_to);
+        }).sort((a:Row,b:Row)=>Date.parse(a.startsAt)-Date.parse(b.startsAt));
+        const available=slots.filter((slot:Row)=>Date.parse(slot.startsAt)>Date.now());
+        return { source:"REAL", business:String(business.name), services:quote.lines?.map((line:Row)=>String(line.name)).slice(0,8)??[], timezone: availability.timezone, date: args.date,
+          recommended:available[0]?{startsAt:available[0].startsAt,endsAt:available[0].endsAt,staffId:available[0].staffId}:null,
+          slots: available.slice(0, 5).map((slot: Row) => ({ startsAt: slot.startsAt, endsAt: slot.endsAt, staffId: slot.staffId })),
+          moreSlotsAvailable: available.length > 5, total: quote.totalPrice, currency: quote.currency, reservationCreated:false };
       }
       if (typeof args.starts_at !== "string" || !/(Z|[+-]\d{2}:\d{2})$/.test(args.starts_at)) throw new Error("Selecciona un horario real.");
       const plan = availability.slots.find((slot: Row) => Date.parse(slot.startsAt) === Date.parse(args.starts_at));

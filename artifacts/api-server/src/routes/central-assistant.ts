@@ -5,6 +5,7 @@ import {bearerHeader,supabaseRequest} from "../lib/supabase";
 import {centralSettings,centralControl,centralBookingsEnabled,CentralAiError} from "../lib/centralAiBudget";
 import {respondCentral} from "../lib/centralAiResponse";
 import {confirmCentralBooking} from "../lib/centralAiBookingTools";
+import {centralAiTimeZone} from "../lib/centralAiTemporal";
 
 const router:IRouter=Router();
 router.use(requireAdmin);
@@ -78,6 +79,7 @@ router.post("/respond",async(req,res)=>{
   if(!centralSettings().enabled){res.status(503).json({error:"La conversación real requiere verificar cuenta, saldo y control acumulado de gasto."});return;}
   const conversation=centralConversationSchema.safeParse(req.body);
   if(!conversation.success){res.status(400).json({error:"Contenido inválido o demasiado extenso. Reduce el mensaje o inicia otra conversación."});return;}
+  if(conversation.data.timeZone&&!centralAiTimeZone(conversation.data.timeZone)){res.status(400).json({error:"La zona horaria del dispositivo no es válida."});return;}
   const now=Date.now(),user=res.locals.adminUserId as string;
   for(const [key,w] of windows)if(w.until<=now)windows.delete(key);
   const w=windows.get(user)??{count:0,until:now+60000};
@@ -86,7 +88,7 @@ router.post("/respond",async(req,res)=>{
   const started=Date.now(),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),45000);
   const disconnected=()=>{if(!res.writableEnded)controller.abort();};res.on("close",disconnected);
   try{
-    const result=await respondCentral(req.header("authorization"),conversation.data.messages,controller.signal,conversation.data.requestId);
+    const result=await respondCentral(req.header("authorization"),conversation.data.messages,controller.signal,conversation.data.requestId,conversation.data.timeZone);
     res.json({...result,metrics:{...result.metrics,latencyMs:Date.now()-started}});
   }catch(error){if(!res.destroyed)failure(res,error);}
   finally{clearTimeout(timer);res.off("close",disconnected);}
