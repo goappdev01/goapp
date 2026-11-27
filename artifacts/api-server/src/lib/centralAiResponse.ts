@@ -1,5 +1,5 @@
 import { CENTRAL_MODEL, CENTRAL_MAX_CALLS, CENTRAL_MAX_OUTPUT, CENTRAL_MAX_PAYLOAD_BYTES,
-  centralUsageCost, reserveCentralTurn, settleCentralTurn, centralControl, CentralAiError } from "./centralAiBudget";
+  centralUsageCost, reserveCentralTurn, settleCentralTurn, centralControl, centralProviderHeaders, centralBookingsEnabled, CentralAiError } from "./centralAiBudget";
 import { CENTRAL_BOOKING_TOOLS, centralBookingTools } from "./centralAiBookingTools";
 
 const instructions = [
@@ -16,7 +16,7 @@ export async function respondCentral(authorization: string | undefined, messages
   // Invalidate first, even if the next inference is blocked by budget or connection.
   await centralControl(authorization, "invalidate");
   const status = await centralControl(authorization, "status");
-  const allowed: string[] = Array.isArray(status.authorizedBusinesses) ? status.authorizedBusinesses : [];
+  const allowed: string[] = centralBookingsEnabled() && Array.isArray(status.authorizedBusinesses) ? status.authorizedBusinesses : [];
   const id = await reserveCentralTurn(authorization, requestId);
   const usage = { input: 0, output: 0, cost: 0, calls: 0 };
   let certain = true, answer = "", metrics: any;
@@ -33,7 +33,7 @@ export async function respondCentral(authorization: string | undefined, messages
       certain = false;
       const response = await fetch("https://api.openai.com/v1/responses", {
         method: "POST", redirect: "error", signal,
-        headers: { Authorization: "Bearer " + process.env.OPENAI_API_KEY, "Content-Type": "application/json" }, body,
+        headers: centralProviderHeaders(), body,
       });
       if (!response.ok) throw new CentralAiError("AI_PROVIDER_UNAVAILABLE", "OpenAI no puede responder ahora. No se repetirá la llamada automáticamente.", response.status === 429 ? 429 : 502);
       const data = await response.json() as {status?:string;usage?:{input_tokens?:number;output_tokens?:number};output?:any[]};

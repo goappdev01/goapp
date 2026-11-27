@@ -9,13 +9,30 @@ export const CENTRAL_CALL_RESERVE_MICRO_USD = 50000;
 export class CentralAiError extends Error {
   constructor(readonly code: string, message: string, readonly status = 503) { super(message); }
 }
+/** Explicit project binding prevents an unrelated existing key using another budget. */
+function providerScope() {
+  const project = process.env.OPENAI_PROJECT_ID;
+  const organization = process.env.OPENAI_ORGANIZATION_ID;
+  return project && /^proj_[A-Za-z0-9]+$/.test(project)
+    && organization && /^org-[A-Za-z0-9]+$/.test(organization) ? { project, organization } : null;
+}
+export function centralProviderHeaders() {
+  const scope = providerScope();
+  if (!scope || !process.env.OPENAI_API_KEY) throw new CentralAiError("AI_PROVIDER_UNCONFIGURED", "Falta verificar el proyecto OpenAI autorizado.");
+  return { Authorization: "Bearer " + process.env.OPENAI_API_KEY, "Content-Type": "application/json",
+    "OpenAI-Project": scope.project, "OpenAI-Organization": scope.organization };
+}
 export function centralSettings() {
   const secret = process.env.GO_CENTRAL_AI_LEDGER_SECRET;
   const enabled = process.env.GO_CENTRAL_AI_ENABLED === "true"
     && process.env.GO_CENTRAL_AI_TEST_MODE === "true"
     && process.env.GO_CENTRAL_AI_MODEL === CENTRAL_MODEL
-    && !!process.env.OPENAI_API_KEY && !!secret && secret.length >= 64;
+    && !!process.env.OPENAI_API_KEY && !!providerScope() && !!secret && secret.length >= 64;
   return { enabled, model: CENTRAL_MODEL, output: CENTRAL_MAX_OUTPUT };
+}
+/** Independent opt-in: conversation activation never enables booking tools. */
+export function centralBookingsEnabled() {
+  return centralSettings().enabled && process.env.GO_CENTRAL_AI_BOOKINGS_ENABLED === "true";
 }
 
 /** Caller JWT + a server-only capability. No service-role key or elevated booking identity. */

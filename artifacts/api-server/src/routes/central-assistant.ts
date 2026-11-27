@@ -2,7 +2,7 @@ import {Router,type IRouter} from "express";
 import {centralConversationSchema,centralHistoryWriteSchema} from "@workspace/api-zod";
 import {requireAdmin} from "../middleware/requireAdmin";
 import {bearerHeader,supabaseRequest} from "../lib/supabase";
-import {centralSettings,centralControl,CentralAiError} from "../lib/centralAiBudget";
+import {centralSettings,centralControl,centralBookingsEnabled,CentralAiError} from "../lib/centralAiBudget";
 import {respondCentral} from "../lib/centralAiResponse";
 import {confirmCentralBooking} from "../lib/centralAiBookingTools";
 
@@ -13,7 +13,7 @@ const historyEnabled=()=>process.env.GO_CENTRAL_AI_HISTORY_ENABLED==="true";
 router.get("/capabilities",async(req,res)=>{
   let available=false,actions=false,budget;
   if(centralSettings().enabled)try{const state=await centralControl(req.header("authorization"),"status");
-    available=state.enabled===true&&state.remainingMicroUsd>=200000;actions=available&&state.authorizedBusinesses?.length>0;
+    available=state.enabled===true&&state.remainingMicroUsd>=200000;actions=available&&centralBookingsEnabled()&&state.authorizedBusinesses?.length>0;
     budget={limitMicroUsd:state.limitMicroUsd,chargedMicroUsd:state.chargedMicroUsd,remainingMicroUsd:state.remainingMicroUsd};
   }catch{/* Fail closed, without revealing configuration or credentials. */}
   res.json({conversation:available,transcription:false,actions,model:centralSettings().model,budget,
@@ -23,6 +23,7 @@ router.get("/capabilities",async(req,res)=>{
 const failure=(res:any,error:unknown)=>res.status(error instanceof CentralAiError?error.status:503)
   .json({code:error instanceof CentralAiError?error.code:"AI_UNAVAILABLE",error:error instanceof CentralAiError?error.message:"No se pudo comprobar la operación. No se confirma ningún resultado."});
 router.get("/proposal/current",async(req,res)=>{
+  if(!centralBookingsEnabled()){res.json({proposal:null});return;}
   try{res.json({proposal:await centralControl(req.header("authorization"),"current")});}catch(error){failure(res,error);}
 });
 router.post("/proposal/cancel",async(req,res)=>{
@@ -31,6 +32,7 @@ router.post("/proposal/cancel",async(req,res)=>{
 });
 router.post("/proposal/confirm",async(req,res)=>{
   if(!centralSettings().enabled){res.status(503).json({error:"La prueba está desactivada."});return;}
+  if(!centralBookingsEnabled()){res.status(503).json({code:"AI_BOOKINGS_DISABLED",error:"Las herramientas de reserva no están habilitadas."});return;}
   if(req.body?.consent!==true||req.body?.confirmed!==true||typeof req.body?.id!=="string"
     ||!centralHistoryId(req.body.id)||Object.keys(req.body).some(key=>!["id","confirmed","consent"].includes(key))){res.status(400).json({error:"Confirma expresamente los datos exactos de la propuesta."});return;}
   try{res.json(await confirmCentralBooking(req.header("authorization"),req.body.id));}catch(error){failure(res,error);}

@@ -8,7 +8,7 @@ function load(file,imports,globals){const context={exports:{},Date,Intl,URL,URLS
 const B='11111111-1111-4111-8111-111111111111',S='22222222-2222-4222-8222-222222222222',R='33333333-3333-4333-8333-333333333333',K='44444444-4444-4444-8444-444444444444';
 function fixture(){const calls=[],ledger=[],providers=[],reserved=new Set();let proposal=null,exhausted=false,unknown=false,openingError=0,providerReply=null;
  const secret='local-only-ledger-fixture'.repeat(4),authorization='Bearer local-only-caller';
- const globals={process:{env:{SUPABASE_URL:'https://auth.invalid',SUPABASE_PUBLISHABLE_KEY:'local-public-key',OPENAI_API_KEY:'local-only-provider-secret',GO_CENTRAL_AI_ENABLED:'true',GO_CENTRAL_AI_TEST_MODE:'true',GO_CENTRAL_AI_MODEL:'gpt-5.4-mini',GO_CENTRAL_AI_LEDGER_SECRET:secret,PORT:'8123'}},fetch:async(url,init)=>{
+ const globals={process:{env:{SUPABASE_URL:'https://auth.invalid',SUPABASE_PUBLISHABLE_KEY:'local-public-key',OPENAI_API_KEY:'local-only-provider-secret',OPENAI_PROJECT_ID:'proj_LocalTest',OPENAI_ORGANIZATION_ID:'org-LocalTest',GO_CENTRAL_AI_ENABLED:'true',GO_CENTRAL_AI_TEST_MODE:'true',GO_CENTRAL_AI_MODEL:'gpt-5.4-mini',GO_CENTRAL_AI_LEDGER_SECRET:secret,PORT:'8123'}},fetch:async(url,init)=>{
   const body=init.body?JSON.parse(init.body):null;const target=String(url);
   if(target.includes('/rpc/go_ai_test_control')){assert.equal(body.p_secret,secret);ledger.push(body);
    const p=body.p_payload;switch(body.p_operation){
@@ -25,6 +25,7 @@ function fixture(){const calls=[],ledger=[],providers=[],reserved=new Set();let 
    }return Response.json({});
   }
   if(target.startsWith('https://api.openai.com/')){providers.push(body);assert.equal(init.headers.Authorization,'Bearer local-only-provider-secret');
+   assert.equal(init.headers['OpenAI-Project'],'proj_LocalTest');assert.equal(init.headers['OpenAI-Organization'],'org-LocalTest');
    if(unknown)throw Error('provider connection lost');
    if(providerReply)return Response.json(providerReply);
    const count=providers.length;
@@ -41,11 +42,23 @@ function fixture(){const calls=[],ledger=[],providers=[],reserved=new Set();let 
  }};
  const supabase=load('artifacts/api-server/src/lib/supabase.ts',{},globals);
  const contract={...load('lib/api-zod/src/central-assistant.ts',{zod:require('zod')},globals),...load('lib/api-zod/src/module-publication.ts',{},globals)};
+ globals.process.env.GO_CENTRAL_AI_BOOKINGS_ENABLED='true';
  const budget=load('artifacts/api-server/src/lib/centralAiBudget.ts',{'node:crypto':require('node:crypto'),'./supabase':supabase},globals);
  const tools=load('artifacts/api-server/src/lib/centralAiBookingTools.ts',{'node:crypto':require('node:crypto'),'./supabase':supabase,'./centralAiBudget':budget,'@workspace/api-zod':contract},globals);
  const response=load('artifacts/api-server/src/lib/centralAiResponse.ts',{'./centralAiBudget':budget,'./centralAiBookingTools':tools},globals);
- return {calls,ledger,providers,budget,tools,response,authorization,setExhausted:v=>exhausted=v,setUnknown:v=>unknown=v,setOpeningError:v=>openingError=v,setReply:v=>providerReply=v};
+ return {calls,ledger,providers,budget,tools,response,authorization,setBookingsEnabled:value=>{globals.process.env.GO_CENTRAL_AI_BOOKINGS_ENABLED=value;},setExhausted:v=>exhausted=v,setUnknown:v=>unknown=v,setOpeningError:v=>openingError=v,setReply:v=>providerReply=v};
 }
+
+test('conversation stays available with booking tools explicitly disabled, even with previously authorized businesses',async()=>{
+ const f=fixture();f.setBookingsEnabled('false');
+ f.setReply({status:'completed',usage:{input_tokens:100,output_tokens:10},output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'Podemos conversar. Las reservas siguen deshabilitadas.'}]}]});
+ const reply=await f.response.respondCentral(f.authorization,[{role:'user',text:'Hola'}],new AbortController().signal,R);
+ assert.ok(reply.answer.includes('Podemos conversar'));assert.equal(f.providers.length,1);assert.equal(f.providers[0].tools.length,0);
+ assert.equal(f.calls.length,0);
+ await assert.rejects(()=>f.tools.centralBookingTools(f.authorization,R,[B],new AbortController().signal).run('read_catalog','{"query":""}'),/no están habilitadas/);
+ await assert.rejects(()=>f.tools.confirmCentralBooking(f.authorization,K),/no están habilitadas/);
+ assert.equal(f.calls.length,0);assert.equal(f.ledger.some(entry=>entry.p_operation==='claim'),false);
+});
 test('natural-language tool loop prepares real GO-route data; only explicit confirmation writes, with stable idempotency and truthful PENDING',async()=>{
  const f=fixture(),reply=await f.response.respondCentral(f.authorization,[{role:'user',text:'Reserva un corte el 2 de diciembre a las 10 en mi establecimiento autorizado'}],new AbortController().signal,R);
  assert.equal(f.providers.length,3);assert.equal(reply.metrics.actualMicroUsd,855);assert.equal(reply.proposal.summary.total,12);

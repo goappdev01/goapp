@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { bearerHeader, supabaseRequest } from "./supabase";
-import { centralControl, CentralAiError } from "./centralAiBudget";
+import { centralControl, centralBookingsEnabled, CentralAiError } from "./centralAiBudget";
 import { CENTRAL_AI_TOOLS, canonicalBookingActivity } from "@workspace/api-zod";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -71,6 +71,7 @@ export function centralBookingTools(authorization: string | undefined, requestId
   return {
     get proposal() { return proposal; },
     async run(name: string, raw: string) {
+      if (!centralBookingsEnabled()) throw new CentralAiError("AI_BOOKINGS_DISABLED", "Las herramientas de reserva no están habilitadas.");
       const args = JSON.parse(raw) as Row;
       if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("Argumentos inválidos");
       if (name === "read_catalog") {
@@ -112,6 +113,7 @@ export function centralBookingTools(authorization: string | undefined, requestId
 }
 
 export async function confirmCentralBooking(authorization: string | undefined, id: string) {
+  if (!centralBookingsEnabled()) throw new CentralAiError("AI_BOOKINGS_DISABLED", "Las herramientas de reserva no están habilitadas.");
   const saved = await centralControl(authorization, "claim", { id });
   if (saved.status === "submitted") return { bookingId: saved.bookingId, status: saved.bookingStatus };
   // This call uses the original caller JWT. RLS, availability, quote, admission and

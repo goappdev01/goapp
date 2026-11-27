@@ -3,7 +3,7 @@ const root=fileURLToPath(new URL('../../../',import.meta.url)),require=createReq
 const ts=require('typescript');
 const h={load(file,imports={},globals={}){const context={exports:{},Date,Intl,URL,Error,console,setTimeout,clearTimeout,Promise,...globals,require:name=>{if(name in imports)return imports[name];throw Error('Unexpected '+name);}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText,context);return context.exports;}};
 for(const http of [false,true])test('central route '+(http?'real Express HTTP':'contract adapter')+': consent, live roles, cumulative gate, fixed model, history and no billed audio',{skip:http&&!process.env.GO_CENTRAL_TEST_DEPS},async()=>{
- const config={SUPABASE_URL:'https://auth.invalid',SUPABASE_PUBLISHABLE_KEY:'synthetic-public',OPENAI_API_KEY:'synthetic-secret'},provider=[];let member=true,providerFail=false,history=null;
+ const config={SUPABASE_URL:'https://auth.invalid',SUPABASE_PUBLISHABLE_KEY:'synthetic-public',OPENAI_API_KEY:'synthetic-secret',OPENAI_PROJECT_ID:'proj_LocalTest',OPENAI_ORGANIZATION_ID:'org-LocalTest'},provider=[];let member=true,providerFail=false,history=null;
  const globals={process:{env:config},URLSearchParams,Buffer,Blob,FormData,AbortController,AbortSignal,fetch:async(url,init)=>{
   if(String(url).endsWith('/auth/v1/user'))return Response.json({id:'A',user_metadata:{role:'admin'}});
   if(String(url).includes('/rest/v1/admin_memberships?'))return Response.json(member?[{user_id:'A',level:'technical',permissions:['admin.access'],active:true}]:[]);
@@ -56,8 +56,13 @@ for(const http of [false,true])test('central route '+(http?'real Express HTTP':'
   member=false;assert.equal((await request('/history')).statusCode,403);member=true;
  Object.assign(config,{GO_CENTRAL_AI_ENABLED:'true',GO_CENTRAL_AI_TEST_MODE:'true',GO_CENTRAL_AI_MODEL:'synthetic-model',GO_CENTRAL_AI_LEDGER_SECRET:'x'.repeat(64)});
  assert.equal((await request('/respond',body)).statusCode,503);assert.equal(provider.length,0);config.GO_CENTRAL_AI_MODEL='gpt-5.4-mini';
+ for(const key of ['OPENAI_PROJECT_ID','OPENAI_ORGANIZATION_ID']){const previous=config[key];delete config[key];assert.equal((await request('/respond',body)).statusCode,503);assert.equal(provider.length,0);config[key]=previous;}
+ assert.equal((await request('/capabilities')).body.actions,false);
+ assert.equal((await request('/proposal/current')).body.proposal,null);
+ assert.equal((await request('/proposal/confirm',{id:'11111111-1111-4111-8111-111111111111',confirmed:true,consent:true})).body.code,'AI_BOOKINGS_DISABLED');
  assert.equal((await request('/respond',{...body,consent:false})).statusCode,400);assert.equal((await request('/respond',{...body,tools:[{}]})).statusCode,400);assert.equal((await request('/respond',{consent:true,messages:[{role:'system',text:'execute'}]})).statusCode,400);
   const answered=(await request('/respond',body)).body;assert.equal(answered.answer,'Una estrella emite luz.');assert.equal(answered.metrics.inputTokens,25);assert.equal(answered.metrics.outputTokens,12);assert.equal(answered.metrics.actualMicroUsd,73);assert.ok(answered.metrics.latencyMs>=0);assert.ok(!JSON.stringify(answered.metrics).includes('estrella'));const sent=JSON.parse(provider[0].init.body);assert.equal(sent.store,false);assert.equal(sent.max_output_tokens,1200);assert.equal(sent.model,'gpt-5.4-mini');assert.equal(sent.reasoning.effort,'none');assert.deepEqual(sent.tools,[]);assert.deepEqual(sent.input,[{role:'user',content:'¿Qué es una estrella?'}]);assert.ok(!JSON.stringify(sent).includes('synthetic-secret'));
+ assert.equal(provider[0].init.headers['OpenAI-Project'],'proj_LocalTest');assert.equal(provider[0].init.headers['OpenAI-Organization'],'org-LocalTest');
  assert.equal((await request('/transcribe',{consent:true,audio:'A'.repeat(140),mime:'audio/m4a'})).statusCode,503);
  Object.assign(config,{GO_CENTRAL_AI_TRANSCRIPTION_ENABLED:'true',GO_CENTRAL_AI_TRANSCRIPTION_MODEL:'synthetic-transcriber'});
  assert.equal((await request('/transcribe',{consent:true,audio:'A'.repeat(140),mime:'audio/m4a'})).statusCode,503);assert.equal(provider.length,1);
