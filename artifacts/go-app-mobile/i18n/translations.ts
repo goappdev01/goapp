@@ -21,6 +21,7 @@ export const LANG_META: LangMeta[] = [
 ];
 
 const es = {
+  go_ai_limit_notice: "GO IA puede cometer errores. Comprueba la información importante antes de tomar decisiones.",
   booking_state_no_show:"NO PRESENTADO",booking_state_expired:"CADUCADA",booking_state_rejected:"RECHAZADA",
   booking_state_accepted: "ACEPTADA",
   booking_state_cancelled: "CANCELADA",
@@ -1693,6 +1694,7 @@ const es = {
 };
 
 const en: typeof es = {
+  go_ai_limit_notice: "GO AI can make mistakes. Check important information before making decisions.",
   booking_state_no_show:"NO SHOW",booking_state_expired:"EXPIRED",booking_state_rejected:"REJECTED",
   booking_state_accepted: "ACCEPTED",
   booking_state_cancelled: "CANCELLED",

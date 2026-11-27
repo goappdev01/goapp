@@ -3,6 +3,7 @@ import { GoScreenModal as Modal } from "@/components/ui/GoScreenModal";
 import type { ScrollViewInstance } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AssistantCloseControls } from "./AssistantCloseControls";
+import { GoAiLimitNotice } from "./GoAiLimitNotice";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
 import { SupportVoiceNotice } from "@/components/landing/SupportVoiceNotice";
@@ -749,6 +750,7 @@ export function BookingAssistantScreen({
               disabled={!input.trim() || !!a.busy}
             />}
           </View>
+          <GoAiLimitNotice uiScale={uiScale}/>
           {!consultation && dock}
           </View>
           {consultation&&<GoNavigationFloating screenKey={consultation.navigationKey??"support-assistant"} safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} keyboardResponsive protectedBottom={footerHeight+(keyboardVisible?10:0)} width={goSize+72} height={Math.max(64,goSize)}><View testID="support-assistant-thumb-controls" style={{flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>
