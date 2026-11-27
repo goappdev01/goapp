@@ -54,8 +54,8 @@ router.use((_req, res, next) => {
 });
 router.get("/capabilities", (_req, res) =>
   res.json({
-    interpretation: !!process.env.OPENAI_API_KEY,
-    transcription: !!process.env.OPENAI_API_KEY,
+    interpretation: !!process.env.OPENAI_API_KEY && process.env.GO_CENTRAL_AI_TEST_MODE !== "true",
+    transcription: !!process.env.OPENAI_API_KEY && process.env.GO_CENTRAL_AI_TEST_MODE !== "true",
   }),
 );
 
@@ -91,7 +91,7 @@ router.post("/interpret", async (req, res) => {
     today,
     (awaiting ?? null) as AwaitingField,
   );
-  const key = process.env.OPENAI_API_KEY;
+  const key = process.env.GO_CENTRAL_AI_TEST_MODE === "true" ? undefined : process.env.OPENAI_API_KEY;
   if (!key) {
     res.json({ request: fallback, mode: "rules" });
     return;
@@ -155,7 +155,7 @@ router.post("/interpret", async (req, res) => {
 });
 
 router.post("/transcribe", async (req, res) => {
-  if (!process.env.OPENAI_API_KEY) {
+  if (!process.env.OPENAI_API_KEY || process.env.GO_CENTRAL_AI_TEST_MODE === "true") {
     res
       .status(503)
       .json({
@@ -315,7 +315,7 @@ router.post("/plan", async (req, res) => {
     });
     return;
   }
-  const key = process.env.OPENAI_API_KEY;
+  const key = process.env.GO_CENTRAL_AI_TEST_MODE === "true" ? undefined : process.env.OPENAI_API_KEY;
   if (!key) {
     res.json({ plan: fallback, mode: "rules" });
     return;

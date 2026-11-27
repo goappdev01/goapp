@@ -2,19 +2,40 @@ import {Router,type IRouter} from "express";
 import {centralConversationSchema,centralHistoryWriteSchema} from "@workspace/api-zod";
 import {requireAdmin} from "../middleware/requireAdmin";
 import {bearerHeader,supabaseRequest} from "../lib/supabase";
+import {centralSettings,centralControl,CentralAiError} from "../lib/centralAiBudget";
+import {respondCentral} from "../lib/centralAiResponse";
+import {confirmCentralBooking} from "../lib/centralAiBookingTools";
 
 const router:IRouter=Router();
 router.use(requireAdmin);
 const windows=new Map<string,{count:number;until:number}>();
-const integer=(key:string)=>{const value=Number(process.env[key]);return Number.isSafeInteger(value)&&value>0?value:0;};
-function settings(){
-  const model=process.env.GO_CENTRAL_AI_MODEL,key=process.env.OPENAI_API_KEY;
-  const output=integer("GO_CENTRAL_AI_MAX_OUTPUT_TOKENS"),requests=integer("GO_CENTRAL_AI_REQUESTS_PER_MINUTE");
-  const enabled=process.env.GO_CENTRAL_AI_ENABLED==="true"&&!!key&&!!model&&output>0&&requests>0;
-  return {enabled,key,model,output,requests,transcription:enabled&&process.env.GO_CENTRAL_AI_TRANSCRIPTION_ENABLED==="true"&&!!process.env.GO_CENTRAL_AI_TRANSCRIPTION_MODEL};
-}
 const historyEnabled=()=>process.env.GO_CENTRAL_AI_HISTORY_ENABLED==="true";
-router.get("/capabilities",(_req,res)=>{const c=settings();res.json({conversation:c.enabled,transcription:c.transcription,actions:false,history:historyEnabled()?"account-opt-in":"local-opt-in"});});
+router.get("/capabilities",async(req,res)=>{
+  let available=false,actions=false,budget;
+  if(centralSettings().enabled)try{const state=await centralControl(req.header("authorization"),"status");
+    available=state.enabled===true&&state.remainingMicroUsd>=200000;actions=available&&state.authorizedBusinesses?.length>0;
+    budget={limitMicroUsd:state.limitMicroUsd,chargedMicroUsd:state.chargedMicroUsd,remainingMicroUsd:state.remainingMicroUsd};
+  }catch{/* Fail closed, without revealing configuration or credentials. */}
+  res.json({conversation:available,transcription:false,actions,model:centralSettings().model,budget,
+    history:historyEnabled()?"account-opt-in":"local-opt-in"});
+});
+
+const failure=(res:any,error:unknown)=>res.status(error instanceof CentralAiError?error.status:503)
+  .json({code:error instanceof CentralAiError?error.code:"AI_UNAVAILABLE",error:error instanceof CentralAiError?error.message:"No se pudo comprobar la operación. No se confirma ningún resultado."});
+router.get("/proposal/current",async(req,res)=>{
+  try{res.json({proposal:await centralControl(req.header("authorization"),"current")});}catch(error){failure(res,error);}
+});
+router.post("/proposal/cancel",async(req,res)=>{
+  if(req.body?.consent!==true||Object.keys(req.body).some(key=>key!=="consent")){res.status(400).json({error:"Solicitud inválida."});return;}
+  try{await centralControl(req.header("authorization"),"invalidate");res.json({cancelled:true,reservationCreated:false});}catch(error){failure(res,error);}
+});
+router.post("/proposal/confirm",async(req,res)=>{
+  if(!centralSettings().enabled){res.status(503).json({error:"La prueba está desactivada."});return;}
+  if(req.body?.consent!==true||req.body?.confirmed!==true||typeof req.body?.id!=="string"
+    ||!centralHistoryId(req.body.id)||Object.keys(req.body).some(key=>!["id","confirmed","consent"].includes(key))){res.status(400).json({error:"Confirma expresamente los datos exactos de la propuesta."});return;}
+  try{res.json(await confirmCentralBooking(req.header("authorization"),req.body.id));}catch(error){failure(res,error);}
+});
+const centralHistoryId=(id:string)=>/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 
 /** Dormant until the reviewed table and RLS are deployed. Caller JWT remains authoritative. */
 router.get("/history",async(req,res)=>{
@@ -49,40 +70,23 @@ router.put("/history",async(req,res)=>{
     res.json({revision:revision+1});
   }catch{res.status(502).json({error:"No se pudo guardar el historial entre dispositivos."});}
 });
-router.post(["/respond","/transcribe"],async(req,res)=>{
-  const c=settings(),audio=req.path==="/transcribe";
+router.post("/transcribe",(_req,res)=>{res.status(503).json({error:"Esta prueba no utiliza audio de pago. Puedes usar el dictado del teclado del dispositivo o escribir."});});
+router.post("/respond",async(req,res)=>{
   if(req.body?.consent!==true){res.status(400).json({error:"Autoriza el envío de esta conversación a OpenAI antes de continuar."});return;}
-  if(!c.enabled||audio&&!c.transcription){res.status(503).json({error:audio?"El dictado no está habilitado. Puedes escribir.":"La conversación con OpenAI aún no está habilitada por el administrador."});return;}
+  if(!centralSettings().enabled){res.status(503).json({error:"La conversación real requiere verificar cuenta, saldo y control acumulado de gasto."});return;}
   const conversation=centralConversationSchema.safeParse(req.body);
-  const validAudio=audio&&typeof req.body.audio==="string"&&req.body.audio.length>=100&&req.body.audio.length<=6700000&&/^[A-Za-z0-9+/]+={0,2}$/.test(req.body.audio)&&req.body.mime==="audio/m4a"&&Object.keys(req.body).every(k=>["audio","mime","consent"].includes(k));
-  if(audio?!validAudio:!conversation.success){res.status(400).json({error:"Contenido inválido o demasiado extenso. Reduce el mensaje o inicia otra conversación."});return;}
+  if(!conversation.success){res.status(400).json({error:"Contenido inválido o demasiado extenso. Reduce el mensaje o inicia otra conversación."});return;}
   const now=Date.now(),user=res.locals.adminUserId as string;
   for(const [key,w] of windows)if(w.until<=now)windows.delete(key);
   const w=windows.get(user)??{count:0,until:now+60000};
-  if(w.count>=c.requests){res.setHeader("Retry-After",String(Math.max(1,Math.ceil((w.until-now)/1000))));res.status(429).json({error:"Has alcanzado el límite de solicitudes configurado. Espera un momento."});return;}
+  if(w.count>=6){res.setHeader("Retry-After",String(Math.max(1,Math.ceil((w.until-now)/1000))));res.status(429).json({error:"Espera un momento antes de enviar otra consulta."});return;}
   w.count++;windows.set(user,w);
-  const started=Date.now();
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+  const started=Date.now(),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),45000);
   const disconnected=()=>{if(!res.writableEnded)controller.abort();};res.on("close",disconnected);
   try{
-    let body:FormData|string;
-    if(audio){const bytes=Buffer.from(req.body.audio,"base64");if(bytes.length>5000000){res.status(413).json({error:"Grabación demasiado larga."});return;}
-      const form=new FormData();form.append("file",new Blob([bytes],{type:"audio/m4a"}),"go.m4a");form.append("model",process.env.GO_CENTRAL_AI_TRANSCRIPTION_MODEL!);form.append("language","es");body=form;
-    }else{
-      if(!conversation.success)return;
-      body=JSON.stringify({model:c.model,store:false,max_output_tokens:c.output,
-        instructions:"Eres GO, una IA generalista. Conversa sobre cualquier tema legítimo en el idioma del interlocutor. No tienes acceso a datos de GO ni herramientas. Nunca afirmes haber realizado acciones, reservas, compras, envíos ni cambios. Si te piden actuar, explica que esta fase solo permite conversar y proponer, sin ejecutar. No solicites contraseñas ni secretos.",
-        input:conversation.data.messages.map(m=>({role:m.role,content:m.text})),tools:[]});
-    }
-    const upstream=await fetch("https://api.openai.com/v1/"+(audio?"audio/transcriptions":"responses"),{method:"POST",redirect:"error",headers:{Authorization:"Bearer "+c.key,...(!audio?{"Content-Type":"application/json"}:{})},body,signal:controller.signal});
-    if(!upstream.ok){res.status(upstream.status===429?429:502).json({error:"OpenAI no puede responder ahora. Conserva tu texto e inténtalo más tarde."});return;}
-    const result=await upstream.json() as {text?:unknown;status?:string;usage?:{input_tokens?:unknown;output_tokens?:unknown};output?:{type?:string;role?:string;content?:{type?:string;text?:string}[]}[]};
-    const text=audio?result.text:Array.isArray(result.output)?result.output.filter((o:any)=>o.type==="message"&&o.role==="assistant").flatMap((o:any)=>o.content??[]).filter((o:any)=>o.type==="output_text").map((o:any)=>o.text).join("\n"):null;
-    if(typeof text!=="string"||!text.trim()||text.length>4000||!audio&&result.status!=="completed")throw Error("Invalid or incomplete provider response");
-    const tokens=(value:unknown)=>Number.isSafeInteger(value)&&Number(value)>=0?Number(value):undefined;
-    res.json(audio?{text,metrics:{latencyMs:Date.now()-started}}
-      :{answer:text,metrics:{latencyMs:Date.now()-started,inputTokens:tokens(result.usage?.input_tokens),outputTokens:tokens(result.usage?.output_tokens)}});
-  }catch{if(!res.destroyed)res.status(502).json({error:"La conexión se ha interrumpido. Puedes continuar por texto o volver a intentarlo."});}
+    const result=await respondCentral(req.header("authorization"),conversation.data.messages,controller.signal,conversation.data.requestId);
+    res.json({...result,metrics:{...result.metrics,latencyMs:Date.now()-started}});
+  }catch(error){if(!res.destroyed)failure(res,error);}
   finally{clearTimeout(timer);res.off("close",disconnected);}
 });
 export default router;

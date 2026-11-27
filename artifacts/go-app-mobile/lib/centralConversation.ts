@@ -1,8 +1,13 @@
-import {centralMessageSchema,type CentralMessage} from "@workspace/api-zod";
+import {centralMessageSchema,centralProposalSchema,type CentralMessage,type CentralProposal} from "@workspace/api-zod";
+
+export type CentralReply={answer:string;proposal?:CentralProposal;metrics?:{latencyMs?:number;inputTokens?:number;outputTokens?:number;
+  actualMicroUsd?:number;estimatedMaximumMicroUsd?:number;chargedMicroUsd?:number;remainingMicroUsd?:number}};
 
 export type CentralConversationDependencies={
   read:(key:string)=>Promise<string|null>;write:(key:string,value:string)=>Promise<void>;remove:(key:string)=>Promise<void>;
-  respond:(messages:CentralMessage[],signal:AbortSignal)=>Promise<{answer:string;metrics?:{latencyMs?:number;inputTokens?:number;outputTokens?:number}}>;
+  respond:(messages:CentralMessage[],signal:AbortSignal)=>Promise<CentralReply>;
+  confirm?:(id:string)=>Promise<{bookingId:string;status:string}>;
+  cancelProposal?:()=>Promise<unknown>;
   speak:(text:string,onStart:()=>void,onDone:()=>void,onError:()=>void)=>void;stop:()=>void;
   cloud?:{read:()=>Promise<{revision:number;messages:CentralMessage[]}>;
     write:(revision:number,messages:CentralMessage[])=>Promise<{revision:number}>};
@@ -12,6 +17,8 @@ export class CentralHistoryConflict extends Error{}
 export class CentralConversation{
   messages:CentralMessage[]=[];consent=false;remember=false;voice=false;busy=false;speaking=false;completed=false;notice="";ready=false;cloudEnabled=false;
   usage={inputTokens:0,outputTokens:0,lastLatencyMs:0,measuredCalls:0};
+  proposal:CentralProposal|null=null;submitting=false;
+  budget:{actualMicroUsd:number;estimatedMaximumMicroUsd:number;chargedMicroUsd:number;remainingMicroUsd:number}|null=null;
   private epoch=0;private speechEpoch=0;private completionTimer:ReturnType<typeof setTimeout>|null=null;private controller:AbortController|null=null;private writes=Promise.resolve();
   private cloudRevision=0;private cloudEpoch=0;
   private listeners=new Set<()=>void>();
@@ -19,6 +26,8 @@ export class CentralConversation{
   constructor(readonly userId:string,private deps:CentralConversationDependencies){this.key="go_central_conversation_v1:"+encodeURIComponent(userId);}
   subscribe(listener:()=>void){this.listeners.add(listener);return()=>{this.listeners.delete(listener);};}
   private change(){for(const listener of this.listeners)listener();}
+  get revision(){return this.epoch;}
+  restoreProposal(value:unknown,revision=this.epoch){if(revision!==this.epoch||this.busy||this.submitting)return;this.proposal=value==null?null:centralProposalSchema.parse(value);this.change();}
   async restore(){const epoch=this.epoch;try{const raw=await this.deps.read(this.key);if(epoch!==this.epoch)return;
     if(raw){const saved=JSON.parse(raw);if(saved.remember===true&&Array.isArray(saved.messages)&&saved.messages.length<=20){const messages=saved.messages.map((m:unknown)=>centralMessageSchema.parse(m));if(messages.reduce((n:number,m:CentralMessage)=>n+m.text.length,0)<=12000){this.messages=messages;this.remember=true;}}}
   }catch{if(epoch===this.epoch)this.notice="No se pudo recuperar el historial local. No se ha transmitido ningún dato.";}
@@ -58,15 +67,38 @@ export class CentralConversation{
   setVoice(value:boolean){this.voice=value;if(!value){this.speechEpoch++;this.speaking=false;this.deps.stop();}this.change();}
   private finish(){this.completed=true;this.change();if(this.completionTimer)clearTimeout(this.completionTimer);this.completionTimer=setTimeout(()=>{this.completed=false;this.completionTimer=null;this.change();},900);}
   interrupt(){this.epoch++;this.speechEpoch++;if(this.completionTimer)clearTimeout(this.completionTimer);this.completionTimer=null;this.completed=false;this.controller?.abort();this.controller=null;this.busy=false;this.speaking=false;this.deps.stop();this.change();}
-  clear(){this.interrupt();this.messages=[];this.notice="";void this.persist();this.change();}
+  clear(){if(this.submitting)return;this.interrupt();this.messages=[];this.proposal=null;this.notice="";
+    void this.deps.cancelProposal?.().catch(()=>{this.notice="No se pudo confirmar la retirada de la propuesta. Ninguna reserva se cancela al borrar el chat.";this.change();});
+    void this.persist();this.change();}
+  async cancelProposal(){if(this.submitting)return;await this.deps.cancelProposal?.();this.proposal=null;this.change();}
+  async confirmProposal(){
+    if(this.submitting||!this.consent||!this.proposal||!this.deps.confirm)throw Error("Revisa y autoriza la propuesta antes de confirmar.");
+    const proposal=this.proposal,epoch=this.epoch;this.submitting=true;this.notice="Enviando la reserva a GO…";this.change();
+    try{const result=await this.deps.confirm(proposal.id);
+      if(!result.bookingId||!["PENDING","CONFIRMED"].includes(result.status))throw Error("GO no confirmó el resultado de la reserva.");
+      if(epoch!==this.epoch)return;
+      this.proposal=null;this.notice=result.status==="PENDING"?"Reserva solicitada y guardada en GO. Pendiente de aceptación.":"Reserva confirmada y guardada en GO.";
+      this.messages=[...this.messages,{role:"assistant" as const,text:this.notice}].slice(-20);void this.persist();
+    }catch(error){if(epoch===this.epoch){this.notice=error instanceof Error?error.message:"No se pudo comprobar el resultado. Reintenta la misma propuesta sin duplicarla.";
+      const status=(error as {status?:number})?.status;
+      if(status&&[400,403,409,422].includes(status))this.proposal=null;
+      else this.proposal={...proposal,state:"submitting"};
+    }throw error;}
+    finally{this.submitting=false;this.change();}
+  }
   async respond(text:string){
+    if(this.submitting)throw Error("Espera el resultado de la reserva antes de cambiar la propuesta.");
     if(!this.ready||!this.consent)throw Error("Autoriza el envío de los mensajes a OpenAI para conversar.");
     if(!text.trim()||text.length>4000)throw Error("Escribe un mensaje de hasta 4.000 caracteres.");
-    this.interrupt();const epoch=this.epoch,controller=new AbortController();this.controller=controller;this.busy=true;this.notice="";this.change();
+    this.interrupt();const epoch=this.epoch,controller=new AbortController();this.controller=controller;this.busy=true;this.proposal=null;this.notice="";this.change();
     const input:CentralMessage[]=[...this.messages,{role:"user",text:text.trim()}];
     while(input.length>19||input.reduce((n,m)=>n+m.text.length,0)>8000)input.shift();
     try{const result=await this.deps.respond(input,controller.signal);if(epoch!==this.epoch)throw Error("Consulta interrumpida.");
       const answer=centralMessageSchema.parse({role:"assistant",text:result.answer});
+      this.proposal=result.proposal?centralProposalSchema.parse(result.proposal):null;
+      const cost=result.metrics;
+      if(cost&&[cost.actualMicroUsd,cost.estimatedMaximumMicroUsd,cost.chargedMicroUsd,cost.remainingMicroUsd].every(n=>Number.isSafeInteger(n)&&Number(n)>=0))
+        this.budget={actualMicroUsd:cost.actualMicroUsd!,estimatedMaximumMicroUsd:cost.estimatedMaximumMicroUsd!,chargedMicroUsd:cost.chargedMicroUsd!,remainingMicroUsd:cost.remainingMicroUsd!};
       const inputTokens=result.metrics?.inputTokens,outputTokens=result.metrics?.outputTokens,latencyMs=result.metrics?.latencyMs;
       if(typeof inputTokens==="number"&&Number.isSafeInteger(inputTokens)&&inputTokens>=0
         &&typeof outputTokens==="number"&&Number.isSafeInteger(outputTokens)&&outputTokens>=0){

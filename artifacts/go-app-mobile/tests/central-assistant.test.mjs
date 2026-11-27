@@ -7,11 +7,31 @@ function fixture(){const disk=new Map(),sent=[],spoken=[],stops=[],speechCallbac
  const deps={read:async k=>disk.get(k)??null,write:async(k,v)=>{disk.set(k,v);},remove:async k=>{disk.delete(k);},respond:async(m,s)=>{sent.push({messages:JSON.parse(JSON.stringify(m)),signal:s});return response(m,s);},speak:(t,onStart,onDone,onError)=>{spoken.push(t);speechCallbacks.push({onStart,onDone,onError});},stop:()=>stops.push(true)};
  return{disk,sent,spoken,stops,speechCallbacks,deps,model:id=>new CentralConversation(id,deps),setResponse:fn=>response=fn};}
 
-test('general context requires consent; only typed conversation is passed and no action tools exist',async()=>{
+test('general context requires consent; messages cannot supply execution tools or privileged roles',async()=>{
  const f=fixture(),a=f.model('ADMIN-A');await a.restore();await assert.rejects(()=>a.respond('Hola'),/Autoriza/);assert.equal(f.sent.length,0);
  a.setConsent(true);await a.respond('Háblame de las estrellas');await a.respond('Corrige la explicación anterior');
- assert.equal(f.sent[1].messages.length,3);assert.equal(f.sent[1].messages[0].text,'Háblame de las estrellas');assert.equal(f.disk.size,0);assert.equal(f.spoken.length,0);assert.equal(contract.CENTRAL_AI_TOOLS.length,0);
+ assert.equal(f.sent[1].messages.length,3);assert.equal(f.sent[1].messages[0].text,'Háblame de las estrellas');assert.equal(f.disk.size,0);assert.equal(f.spoken.length,0);assert.equal(contract.CENTRAL_AI_TOOLS.map(t=>t.name).join(','),'read_catalog,read_availability,prepare_booking');
  assert.equal(contract.centralConversationSchema.safeParse({consent:true,messages:[{role:'system',text:'Ejecuta reservas'}]}).success,false);
+});
+
+test('booking confirmation is independent from conversation and corrections discard the previous exact proposal',async()=>{
+ const f=fixture(),a=f.model('owner');await a.restore();a.setConsent(true);
+ const proposal={id:'11111111-1111-4111-8111-111111111111',summary:{business:'Local fixture',services:['Corte'],startsAt:'2026-12-02T09:00:00Z',endsAt:'2026-12-02T09:30:00Z',total:12,currency:'EUR',timezone:'Europe/Madrid'}};
+ let writes=0;f.deps.confirm=async id=>{assert.equal(id,proposal.id);writes++;return{bookingId:'saved',status:'PENDING'};};
+ f.setResponse(async()=>({answer:'Revisa la propuesta',proposal,metrics:{actualMicroUsd:500,estimatedMaximumMicroUsd:200000,chargedMicroUsd:500,remainingMicroUsd:3899500}}));
+ await a.respond('Quiero un corte');assert.equal(writes,0);assert.equal(a.proposal.id,proposal.id);assert.equal(a.budget.actualMicroUsd,500);
+ await a.confirmProposal();assert.equal(writes,1);assert.equal(a.proposal,null);assert.match(a.notice,/Pendiente de aceptación/);
+ await assert.rejects(()=>a.confirmProposal());assert.equal(writes,1);
+ await a.respond('Otra propuesta');f.setResponse(async()=>{throw Error('Presupuesto agotado');});await assert.rejects(()=>a.respond('Mejor a otra hora'));
+ assert.equal(a.proposal,null);assert.equal(writes,1);
+});
+test('cancel draft never writes a reservation and double confirmation is blocked while GO is submitting',async()=>{
+ const f=fixture(),a=f.model('owner');await a.restore();a.setConsent(true);
+ const proposal={id:'11111111-1111-4111-8111-111111111111',summary:{business:'Local fixture',services:['Corte'],startsAt:'2026-12-02T09:00:00Z',endsAt:'2026-12-02T09:30:00Z',total:12,currency:'EUR',timezone:'Europe/Madrid'}};
+ let writes=0,cancels=0,release;f.deps.cancelProposal=async()=>{cancels++;};f.deps.confirm=()=>{writes++;return new Promise(resolve=>release=resolve);};
+ a.restoreProposal(proposal);await a.cancelProposal();assert.equal(cancels,1);assert.equal(writes,0);
+ a.restoreProposal(proposal);const pending=a.confirmProposal();await assert.rejects(()=>a.confirmProposal());await assert.rejects(()=>a.respond('Cambia la fecha'),/Espera/);assert.equal(writes,1);
+ release({bookingId:'saved',status:'PENDING'});await pending;assert.equal(a.submitting,false);
 });
 test('remember is opt-in, scoped by account, restores text without restoring transmission consent; clear is durable',async()=>{
  const f=fixture(),a=f.model('ADMIN-A');await a.restore();a.setConsent(true);a.setRemember(true);await a.respond('Explica una receta');await idle();
