@@ -99,6 +99,8 @@ test('compact handedness buttons retain selection, persistence, center base and 
     'react-native': f.native,
     '@/hooks/useGoDockPreference': { useGoDockPreference: (...args) => dock.useGoDockPreference(...args) },
     '@/components/ui/GoNavigationAppearanceControl': { GoNavigationAppearanceControl: () => null },
+    '@/components/booking-assistant/GoAiPreferences': { GoAiPreferences: () => null },
+    '@/components/perfil/GoAlertsSettings': { GoAlertsSettings: () => null },
     '@/components/ui/GoCloseButton': { GoCloseButton: () => null },
     '@/components/dev/GoDevPanel': { GoDevPanel: () => null },
     '../DraggableFAB': { DraggableFAB: ({ children }) => children },

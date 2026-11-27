@@ -25,6 +25,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { GUIDANCE_NAMES, GUIDANCE_NAMES_EN } from "../../utils/guidance";
 import { COUNTRY_CONFIGS, MARKET_STORAGE_KEY, REGION_STORAGE_KEY, type Market } from "../../utils/countryConfig";
 import { GoAlertsSettings } from "@/components/perfil/GoAlertsSettings";
+import {GoAiPreferences} from "@/components/booking-assistant/GoAiPreferences";
 
 const GO_GOLD = "#C8A037";
 const BLUE    = "#4A80BD";
@@ -153,6 +154,7 @@ export function HerramientasPanel({
 
           {landingVariantControls}
           {listTools}
+          <GoAiPreferences visible={visible}/>
           <GoNavigationAppearanceControl/>
           <View style={s.card}>
 

@@ -1,7 +1,8 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),h=require('./helpers/unified-note-fixture.cjs');
 const contract=h.load('../../lib/api-zod/src/central-assistant.ts',{zod:require('zod')});
-const {CentralConversation}=h.load('lib/centralConversation.ts',{'@workspace/api-zod':contract},{AbortController});
+const voicePreferences=h.load('lib/centralVoicePreferences.ts');
+const {CentralConversation}=h.load('lib/centralConversation.ts',{'@workspace/api-zod':contract,'./centralVoicePreferences':voicePreferences},{AbortController});
 const idle=()=>new Promise(setImmediate);
 function fixture(){const disk=new Map(),sent=[],spoken=[],stops=[],speechCallbacks=[];let response=async()=>({answer:'Respuesta general sobre astronomía'});
  const deps={read:async k=>disk.get(k)??null,write:async(k,v)=>{disk.set(k,v);},remove:async k=>{disk.delete(k);},respond:async(m,s)=>{sent.push({messages:JSON.parse(JSON.stringify(m)),signal:s});return response(m,s);},speak:(t,onStart,onDone,onError)=>{spoken.push(t);speechCallbacks.push({onStart,onDone,onError});},stop:()=>stops.push(true)};

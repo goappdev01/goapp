@@ -1,4 +1,5 @@
 import {centralMessageSchema,centralProposalSchema,type CentralMessage,type CentralProposal} from "@workspace/api-zod";
+import {centralSpeechPreferences,type CentralSpeechPreferences} from "./centralVoicePreferences";
 
 export type CentralReply={answer:string;proposal?:CentralProposal;metrics?:{latencyMs?:number;inputTokens?:number;outputTokens?:number;
   actualMicroUsd?:number;estimatedMaximumMicroUsd?:number;chargedMicroUsd?:number;remainingMicroUsd?:number}};
@@ -18,11 +19,13 @@ export const CENTRAL_CONSENT_VERSION=1;
 /** Only explicit conversation text is ever transmitted. No GO data/action dispatcher. */
 export class CentralConversation{
   messages:CentralMessage[]=[];consent=false;consentReviewed=false;remember=false;voice=true;busy=false;speaking=false;completed=false;notice="";ready=false;cloudEnabled=false;
+  speech=centralSpeechPreferences(null);
   usage={inputTokens:0,outputTokens:0,lastLatencyMs:0,measuredCalls:0};
   proposal:CentralProposal|null=null;submitting=false;
   budget:{actualMicroUsd:number;estimatedMaximumMicroUsd:number;chargedMicroUsd:number;remainingMicroUsd:number}|null=null;
   private epoch=0;private speechEpoch=0;private completionTimer:ReturnType<typeof setTimeout>|null=null;private controller:AbortController|null=null;private writes=Promise.resolve();
   private cloudRevision=0;private cloudEpoch=0;
+  private restoring:Promise<void>|null=null;
   private listeners=new Set<()=>void>();
   readonly key:string;
   constructor(readonly userId:string,private deps:CentralConversationDependencies){this.key="go_central_conversation_v1:"+encodeURIComponent(userId);}
@@ -30,10 +33,12 @@ export class CentralConversation{
   private change(){for(const listener of this.listeners)listener();}
   get revision(){return this.epoch;}
   restoreProposal(value:unknown,revision=this.epoch){if(revision!==this.epoch||this.busy||this.submitting)return;this.proposal=value==null?null:centralProposalSchema.parse(value);this.change();}
-  async restore(){const epoch=this.epoch;try{const [raw,preferences]=await Promise.all([this.deps.read(this.key),this.deps.read(this.key+":preferences")]);if(epoch!==this.epoch)return;
+  restore(){if(this.ready)return Promise.resolve();return this.restoring??=this.restoreStored().finally(()=>{this.restoring=null;});}
+  private async restoreStored(){const epoch=this.epoch;try{const [raw,preferences]=await Promise.all([this.deps.read(this.key),this.deps.read(this.key+":preferences")]);if(epoch!==this.epoch)return;
     const prefs=preferences?JSON.parse(preferences):null;
     if(prefs&&typeof prefs==="object"&&!Array.isArray(prefs)){
       this.voice=prefs.voice!==false;this.remember=prefs.remember===true;
+      this.speech=centralSpeechPreferences(prefs.speech);
       this.consentReviewed=prefs.consentVersion===CENTRAL_CONSENT_VERSION&&typeof prefs.consent==="boolean";
       this.consent=this.consentReviewed&&prefs.consent===true;
     }
@@ -70,15 +75,16 @@ export class CentralConversation{
     }catch{this.cloudEnabled=false;this.notice="No se pudo recuperar el historial de la cuenta. Se conserva la copia de este dispositivo.";this.change();}
   }
   async disableCloud(){await this.deps.remove(this.key+":cloud");this.cloudEnabled=false;this.cloudEpoch++;this.change();}
-  private persistPreferences(){if(!this.ready)return;const saved=JSON.stringify({consentVersion:CENTRAL_CONSENT_VERSION,consent:this.consent,remember:this.remember,voice:this.voice});
+  private persistPreferences(){if(!this.ready)return;const saved=JSON.stringify({consentVersion:CENTRAL_CONSENT_VERSION,consent:this.consent,remember:this.remember,voice:this.voice,speech:this.speech});
     this.writes=this.writes.then(()=>this.deps.write(this.key+":preferences",saved)).catch(()=>{this.notice="No se pudo guardar la preferencia. Compruébala al volver a entrar.";this.change();});}
   setConsent(value:boolean){if(!this.ready)return;this.consent=value;this.consentReviewed=true;if(!value)this.interrupt();this.persistPreferences();this.change();}
   setRemember(value:boolean){if(!this.ready||this.cloudEnabled&&!value)return;this.remember=value;this.persistPreferences();void this.persist();this.change();}
   setVoice(value:boolean){if(!this.ready)return;this.voice=value;if(!value){this.speechEpoch++;this.speaking=false;this.deps.stop();}this.persistPreferences();this.change();}
+  setSpeech(value:Partial<CentralSpeechPreferences>){if(!this.ready)return;this.speech=centralSpeechPreferences({...this.speech,...value});this.persistPreferences();this.change();}
   private finish(){this.completed=true;this.change();if(this.completionTimer)clearTimeout(this.completionTimer);this.completionTimer=setTimeout(()=>{this.completed=false;this.completionTimer=null;this.change();},900);}
   interrupt(){this.epoch++;this.speechEpoch++;if(this.completionTimer)clearTimeout(this.completionTimer);this.completionTimer=null;this.completed=false;this.controller?.abort();this.controller=null;this.busy=false;this.speaking=false;this.deps.stop();this.change();}
-  clear(){if(this.submitting)return;this.interrupt();this.messages=[];this.proposal=null;this.notice="";
-    void this.deps.cancelProposal?.().catch(()=>{this.notice="No se pudo confirmar la retirada de la propuesta. Ninguna reserva se cancela al borrar el chat.";this.change();});
+  clear(){if(this.submitting)return;const hadProposal=!!this.proposal;this.interrupt();this.messages=[];this.proposal=null;this.notice="";
+    if(hadProposal)void this.deps.cancelProposal?.().catch(()=>{this.notice="No se pudo confirmar la retirada de la propuesta. Ninguna reserva se cancela al borrar el chat.";this.change();});
     void this.persist();this.change();}
   async cancelProposal(){if(this.submitting)return;await this.deps.cancelProposal?.();this.proposal=null;this.change();}
   async confirmProposal(){

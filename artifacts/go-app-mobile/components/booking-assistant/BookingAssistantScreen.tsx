@@ -52,7 +52,7 @@ import {
 
 export interface BookingAssistantProps {
   /** Read-only consultation; no booking/task dispatcher or automatic draft replacement. */
-  consultation?:{scopeKey:string;title:string;sourceText:string;cancelRequest?:number;controls?:React.ReactNode;settings?:React.ReactNode;compactConversation?:boolean;messages?:{id:string|number;role:string;text:string}[];voiceOptions?:BookingVoiceOptions;errorMessage?:(error:unknown)=>string;onInterrupt?:()=>void;navigationKey?:string;introduction?:string;respond?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;onAcceptDraft?:(draft:string,baseline:string)=>void;speaking?:boolean;completed?:boolean};
+  consultation?:{scopeKey:string;title:string;sourceText:string;cancelRequest?:number;controls?:React.ReactNode;conversationActions?:React.ReactNode;settings?:React.ReactNode;compactConversation?:boolean;messages?:{id:string|number;role:string;text:string}[];voiceOptions?:BookingVoiceOptions;errorMessage?:(error:unknown)=>string;onInterrupt?:()=>void;navigationKey?:string;introduction?:string;respond?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;onAcceptDraft?:(draft:string,baseline:string)=>void;speaking?:boolean;completed?:boolean};
   uiScale?: "compacto" | "estandar" | "grande";
   visible: boolean;
   listenRequest?: number;
@@ -690,7 +690,7 @@ export function BookingAssistantScreen({
               onPress={() => { if(toolsOpen)closeTools();else setToolsOpen(true); }}/>
           </View>}
           {visible&&consultation?.settings&&toolsOpen&&<View testID="central-ai-settings-layer" style={{position:"absolute",left:12,right:12,top:0,bottom:0,zIndex:90}}>
-            <GoToolPanel handedness={handedness} testID="central-ai-settings-panel" style={{width:"100%",height:"100%"}}>
+            <GoToolPanel handedness={handedness} testID="central-ai-settings-panel" style={{width:"100%",height:"100%",backgroundColor:"#F8FAFC",overflow:"hidden"}}>
               <ScrollView ref={panelScroll} keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:12,paddingBottom:24}}>
                 <Text accessibilityRole="header" style={{fontSize:18,fontWeight:"700",color:"#183955",marginBottom:12}}>Configuración de GO IA</Text>
                 {consultation.settings}
@@ -742,6 +742,7 @@ export function BookingAssistantScreen({
             </>
           )}
           <View onLayout={event => setFooterHeight(event.nativeEvent.layout.height)}>
+          {consultation?.conversationActions}
           <View testID={consultation?"support-assistant-composer":undefined} style={consultation?{marginHorizontal:16,marginBottom:10,padding:6,gap:6,flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",borderWidth:1,borderColor:"#b4bdc6",borderRadius:18,backgroundColor:"#fafbfc"}:s.composer}>
             <TextInput
               accessibilityLabel="Solicitud a GO"
