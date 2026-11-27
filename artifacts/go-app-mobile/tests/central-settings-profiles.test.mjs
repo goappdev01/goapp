@@ -95,3 +95,12 @@ test('ADMIN status cannot display the previous account budget while the new acco
  identity={userId:'B',model:{subscribe:()=>()=>{}}};const changing=f.render();assert.doesNotMatch(texts(changing),/account-A-model|0\.123456|4\.00/);assert.match(texts(changing),/sin comprobar/);
  next({model:'account-B-model',conversation:true,actions:false});await tick();assert.match(texts(f.render()),/account-B-model/);
 });
+
+test('one informed authorization is shared, and a late allow after leaving the account cannot persist consent',async()=>{
+ let buttons,current=true,alerts=0,changes=0;const model={ready:true,consent:false,setConsent(v){changes++;this.consent=v;}};
+ const consent=load('lib/centralConsent.ts',{'react-native':{Alert:{alert:(title,copy,actions)=>{alerts++;buttons=actions;assert.match(copy,/OpenAI/);assert.match(copy,/Privacidad/);}}}});
+ const first=consent.requestCentralConsent(model,()=>current);const outcome=first.catch(e=>e);
+ assert.equal(consent.requestCentralConsent(model,()=>current),first);assert.equal(alerts,1);
+ current=false;buttons.find(b=>b.text==='Permitir').onPress();assert.match((await outcome).message,/sesión/);assert.equal(changes,0);assert.equal(model.consent,false);
+ const source=readFileSync('components/booking-assistant/CentralAssistant.tsx','utf8');assert.match(source,/return\(\)=>\{current=false;if\(active.current.model===model\)active.current.visible=false/);
+});

@@ -26,9 +26,9 @@ export function CentralAssistant({userId,...props}:BookingAssistantProps&{userId
       if(c.actions){const revision=model.revision;void centralAssistantApi<{proposal:unknown}>(userId,"/proposal/current").then(result=>{if(current)model.restoreProposal(result.proposal,revision);}).catch(()=>{if(current)setCloudError("No se pudo recuperar la propuesta pendiente. No se confirma ninguna reserva.");});}
       if(c.history==="account-opt-in")void model.restoreCloudPreference();
     }).catch(error=>{if(current)setCloudError("No se pudo comprobar la disponibilidad de GO IA. Inténtalo de nuevo.");});
-    return()=>{current=false;model.interrupt();localRecognition.abort();};
+    return()=>{current=false;if(active.current.model===model)active.current.visible=false;model.interrupt();localRecognition.abort();};
   },[model,props.visible,userId]);
-  useEffect(()=>{const off=onSessionChanged(()=>model.interrupt()),app=AppState.addEventListener("change",state=>{if(state!=="active")model.interrupt();});return()=>{off();app.remove();model.interrupt();};},[model]);
+  useEffect(()=>{const off=onSessionChanged(()=>{if(active.current.model===model)active.current.visible=false;model.interrupt();}),app=AppState.addEventListener("change",state=>{if(state!=="active")model.interrupt();});return()=>{off();app.remove();model.interrupt();};},[model]);
   const interrupt=()=>{model.interrupt();setCancelRequest(n=>n+1);};
   const settings=<CentralVoiceSettings model={model}/>;
   const conversationActions=(model.busy||model.speaking)?<TouchableOpacity testID="central-ai-interrupt" accessibilityRole="button" onPress={interrupt} style={{minHeight:44,paddingHorizontal:16,paddingVertical:10,alignItems:"center",backgroundColor:"#F1F5F9"}}><Text style={{fontSize:14,color:"#183955",flexShrink:1}}>Interrumpir respuesta</Text></TouchableOpacity>:null;
