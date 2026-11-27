@@ -52,7 +52,7 @@ import {
 
 export interface BookingAssistantProps {
   /** Read-only consultation; no booking/task dispatcher or automatic draft replacement. */
-  consultation?:{scopeKey:string;title:string;sourceText:string;cancelRequest?:number;controls?:React.ReactNode;messages?:{id:string|number;role:string;text:string}[];voiceOptions?:BookingVoiceOptions;errorMessage?:(error:unknown)=>string;onInterrupt?:()=>void;navigationKey?:string;introduction?:string;respond?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;onAcceptDraft?:(draft:string,baseline:string)=>void;speaking?:boolean;completed?:boolean};
+  consultation?:{scopeKey:string;title:string;sourceText:string;cancelRequest?:number;controls?:React.ReactNode;settings?:React.ReactNode;compactConversation?:boolean;messages?:{id:string|number;role:string;text:string}[];voiceOptions?:BookingVoiceOptions;errorMessage?:(error:unknown)=>string;onInterrupt?:()=>void;navigationKey?:string;introduction?:string;respond?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;onAcceptDraft?:(draft:string,baseline:string)=>void;speaking?:boolean;completed?:boolean};
   uiScale?: "compacto" | "estandar" | "grande";
   visible: boolean;
   listenRequest?: number;
@@ -195,6 +195,7 @@ export function BookingAssistantScreen({
     else onClose();
   }
   function consultationBack(){
+    if(consultation?.settings&&toolsOpen){setToolsOpen(false);return;}
     if(keyboardVisible||Keyboard.isVisible()){Keyboard.dismiss();return;}
     close();
   }
@@ -267,7 +268,7 @@ export function BookingAssistantScreen({
         ? "Transcribiendo…"
         : "";
   const micDisabled =
-    !listening && ((!!a.busy&&!consultation?.onInterrupt) || voice.status === "preparing" || voice.status === "transcribing");
+    !consultation?.compactConversation&&!listening && ((!!a.busy&&!consultation?.onInterrupt) || voice.status === "preparing" || voice.status === "transcribing");
   const saving = ["Guardando en GO…", "Confirmando reserva…", "Cancelando reserva…"].includes(a.busy);
   const panelState = { ...a, reset };
   const dock = (
@@ -275,7 +276,7 @@ export function BookingAssistantScreen({
                 <TouchableOpacity
                   accessibilityRole="button"
                   accessibilityLabel={
-                    listening ? "Detener escucha y enviar" : "Escuchar con GO"
+                    listening ? "Detener escucha y enviar" : consultation?.compactConversation&&(voice.status==="preparing"||voice.status==="transcribing")?"Interrumpir escucha":"Escuchar con GO"
                   }
                   accessibilityState={{
                     selected: listening,
@@ -283,6 +284,8 @@ export function BookingAssistantScreen({
                   }}
                   disabled={micDisabled}
                   onPress={() => {
+                    if(consultation?.compactConversation)Keyboard.dismiss();
+                    if(consultation?.compactConversation&&(voice.status==="preparing"||voice.status==="transcribing")){voice.abort();consultation.onInterrupt?.();return;}
                     if (listening) void voice.stop();
                     else {
                       if(consultation?.onInterrupt){consultationEpoch.current++;consultationFlight.current=false;a.setBusy("");consultation.onInterrupt();}
@@ -340,8 +343,10 @@ export function BookingAssistantScreen({
           )}
           {!consultation&&keyboardVisible&&<IconButton icon="chevron-down" label="Ocultar teclado" onPress={()=>Keyboard.dismiss()}/>}
           {!consultation&&!navigationHeight&&<GoCloseButton level="panel" accessibilityLabel="Volver a la pantalla anterior" onPress={()=>close()} disabled={saving}/>}
+          {consultation?.settings&&<GoCloseButton testID="central-ai-settings-toggle" level="settings" appearance="light" touchSize={48} preserveTouchSize accessibilityLabel={toolsOpen?"Cerrar configuración de GO IA":"Configuración de GO IA"} onPress={()=>{Keyboard.dismiss();voice.abort();setToolsOpen(value=>!value);}}/>}
         </View>
-        {consultation&&<SupportVoiceNotice key={consultation.scopeKey} message={voiceAttempt>0?voice.error:""} attempt={voiceAttempt}/>}
+        {consultation&&<SupportVoiceNotice key={consultation.scopeKey} detailed={consultation.compactConversation} message={voiceAttempt>0?voice.error:""} attempt={voiceAttempt}/>}
+        {consultation?.compactConversation&&!!voiceText&&<Text testID="central-ai-listening" accessibilityLiveRegion="polite" style={{fontSize:13,color:"#41556b",paddingHorizontal:16}}>{voiceText}</Text>}
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -354,7 +359,7 @@ export function BookingAssistantScreen({
           <ScrollView
             ref={scroll}
             style={{ flex: 1 }}
-            contentContainerStyle={[s.conversation, { flexGrow: 1 },!consultation&&[{paddingBottom:navigationHeight+20},handedness==="right"?{paddingRight:68}:{paddingLeft:68}]]}
+            contentContainerStyle={[s.conversation, { flexGrow: 1 },!consultation&&[{paddingBottom:navigationHeight+20},handedness==="right"?{paddingRight:68}:{paddingLeft:68}],consultation?.compactConversation&&(handedness==="right"?{paddingRight:goSize+28}:{paddingLeft:goSize+28})]}
             bounces={false}
             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
             keyboardShouldPersistTaps="handled"
@@ -370,7 +375,7 @@ export function BookingAssistantScreen({
               if (followEnd.current) scroll.current?.scrollToEnd({ animated: true });
             }}
           >
-            <View testID="assistant-conversation-content" style={{ gap: s.conversation.gap,paddingBottom:consultation?82:0 }} onLayout={event => {
+            <View testID="assistant-conversation-content" style={{ gap: s.conversation.gap,paddingBottom:consultation?.compactConversation?goSize+88:consultation?82:0 }} onLayout={event => {
               const height = event.nativeEvent.layout.height + s.conversation.padding + s.conversation.paddingBottom;
               setConversationMeasurement(previous => previous.height === height && previous.messages === conversationMessages.length
                 ? previous : { height, messages: conversationMessages.length });
@@ -684,6 +689,14 @@ export function BookingAssistantScreen({
               accessibilityLabel={toolsOpen?"Ocultar herramientas de GO":"Mostrar herramientas de GO"} disabled={saving}
               onPress={() => { if(toolsOpen)closeTools();else setToolsOpen(true); }}/>
           </View>}
+          {visible&&consultation?.settings&&toolsOpen&&<View testID="central-ai-settings-layer" style={{position:"absolute",left:12,right:12,top:0,bottom:0,zIndex:90}}>
+            <GoToolPanel handedness={handedness} testID="central-ai-settings-panel" style={{width:"100%",height:"100%"}}>
+              <ScrollView ref={panelScroll} keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:12,paddingBottom:24}}>
+                <Text accessibilityRole="header" style={{fontSize:18,fontWeight:"700",color:"#183955",marginBottom:12}}>Configuración de GO IA</Text>
+                {consultation.settings}
+              </ScrollView>
+            </GoToolPanel>
+          </View>}
           </View>
           {!consultation&&!!(a.busy || voiceText || a.notice || voice.error) && (
             <View style={s.status} accessibilityLiveRegion="polite">
@@ -750,10 +763,10 @@ export function BookingAssistantScreen({
               disabled={!input.trim() || !!a.busy}
             />}
           </View>
-          <GoAiLimitNotice uiScale={uiScale}/>
+          <GoAiLimitNotice uiScale={uiScale} visible={visible} dismissible={!!consultation?.compactConversation} appearance={consultation?.compactConversation?"light":undefined}/>
           {!consultation && dock}
           </View>
-          {consultation&&<GoNavigationFloating screenKey={consultation.navigationKey??"support-assistant"} safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} keyboardResponsive protectedBottom={footerHeight+(keyboardVisible?10:0)} width={goSize+72} height={Math.max(64,goSize)}><View testID="support-assistant-thumb-controls" style={{flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>
+          {consultation&&<GoNavigationFloating screenKey={consultation.navigationKey??"support-assistant"} pointerEvents={toolsOpen&&!!consultation.settings?"none":"box-none"} safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} keyboardResponsive protectedBottom={footerHeight+(keyboardVisible?10:0)} width={consultation.compactConversation?Math.max(64,goSize):goSize+72} height={consultation.compactConversation?goSize+72:Math.max(64,goSize)}><View testID="support-assistant-thumb-controls" style={{flexDirection:consultation.compactConversation?"column":handedness==="left"?"row-reverse":"row",alignItems:consultation.compactConversation?"center":"flex-end",gap:8}}>
             {dock}<GoCloseButton level="panel" appearance="light" keyboardVisible={keyboardVisible} disabled={saving} accessibilityLabel={keyboardVisible?"Ocultar teclado":consultation.navigationKey?"Volver a GO":"Volver a AYUDA"} onPress={consultationBack}/>
           </View></GoNavigationFloating>}
           </View>

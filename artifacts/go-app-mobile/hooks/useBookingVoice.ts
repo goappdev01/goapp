@@ -9,6 +9,7 @@ import {
 import * as FileSystem from "expo-file-system/legacy";
 import { assistantApi, AssistantApiError } from "@/lib/bookingAssistant";
 import { getAuthenticatedUserId } from "@/data/booking";
+import type {DeviceSpeechPort} from "@/lib/deviceSpeechRecognition";
 
 type Recognition = {
   lang: string;
@@ -30,7 +31,7 @@ type SpeechWindow = {
   SpeechRecognition?: new () => Recognition;
   webkitSpeechRecognition?: new () => Recognition;
 };
-export type BookingVoiceOptions={requireTranscriptionReady?:boolean;capabilities?:()=>Promise<{transcription:boolean}>;transcribe?:(body:{audio:string;mime:string})=>Promise<{text:string}>;beforeStart?:()=>Promise<void>};
+export type BookingVoiceOptions={localRecognition?:DeviceSpeechPort;requireTranscriptionReady?:boolean;capabilities?:()=>Promise<{transcription:boolean}>;transcribe?:(body:{audio:string;mime:string})=>Promise<{text:string}>;beforeStart?:()=>Promise<void>};
 export function useBookingVoice(onText: (text: string, zone: boolean) => void, options?: BookingVoiceOptions) {
   const optionsRef=useRef(options);optionsRef.current=options;
   const recorderStatus = useRef<(event: { hasError: boolean; isFinished: boolean; mediaServicesDidReset?: boolean; url?: string | null }) => void>(() => {});
@@ -43,6 +44,7 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void, o
   const statusRef = useRef(status);
   const generation = useRef(0);
   const recognizer = useRef<Recognition | null>(null);
+  const localRecognizer=useRef<DeviceSpeechPort|null>(null);
   const nativeQueue = useRef<Promise<void>>(Promise.resolve());
   const targetZone = useRef(false);
   const callback = useRef(onText);
@@ -70,12 +72,13 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void, o
   }, [recorder]);
   const abort = useCallback(() => {
     generation.current++;
+    const local=localRecognizer.current;localRecognizer.current=null;local?.abort();
     if (recognizer.current) {
       recognizer.current.onend = null;
       recognizer.current.abort();
       recognizer.current = null;
     }
-    if (Platform.OS !== "web") void withRecorder(cleanupNative);
+    if (Platform.OS !== "web"&&!local) void withRecorder(cleanupNative);
     changeStatus("idle");
     setTranscript("");
   }, [changeStatus, cleanupNative, withRecorder]);
@@ -110,6 +113,14 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void, o
       changeStatus("preparing");
       try{await optionsRef.current?.beforeStart?.();}catch(error){if(generation.current===token){setError(error instanceof Error?error.message:"No se pudo iniciar la voz. Puedes escribir.");changeStatus("idle");}return;}
       if(generation.current!==token)return;
+      const local=optionsRef.current?.localRecognition;
+      if(local){localRecognizer.current=local;
+        try{await local.start({started:()=>{if(generation.current===token)changeStatus("listening");},
+          partial:text=>{if(generation.current===token)setTranscript(text);},
+          ended:text=>{if(generation.current!==token)return;localRecognizer.current=null;changeStatus("idle");setTranscript("");
+            if(text)callback.current(text,targetZone.current);else setError("No se ha detectado voz. Pulsa GO para intentarlo de nuevo.");},
+          failed:message=>{if(generation.current===token){localRecognizer.current=null;changeStatus("idle");setError(message);}},
+        });}catch(error){if(generation.current===token){localRecognizer.current=null;changeStatus("idle");setError(error instanceof Error?error.message:"No se pudo iniciar el reconocimiento local.");}}return;}
       if (Platform.OS === "web") {
         const scope = globalThis as unknown as SpeechWindow;
         const Constructor =
@@ -227,6 +238,7 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void, o
   );
   const stop = useCallback(async () => {
     if (statusRef.current !== "listening") return;
+    if(localRecognizer.current){changeStatus("transcribing");try{localRecognizer.current.stop();}catch{abort();setError("No se pudo finalizar la escucha. Puedes escribir tu mensaje.");}return;}
     if (recognizer.current) {
       changeStatus("transcribing");
       recognizer.current.stop();
@@ -311,7 +323,7 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void, o
         setTranscript("");
       }
     }
-  }, [recorder, changeStatus, withRecorder, cleanupNative]);
+  }, [recorder, changeStatus, withRecorder, cleanupNative,abort]);
   // Bound the recording without presenting countdowns or percentages.
   useEffect(() => {
     if (status !== "listening" || Platform.OS === "web") return;

@@ -14,15 +14,22 @@ function load(file,modules={}){
 const {translations}=load("i18n/translations.ts"),colors=load("constants/colors.ts").default;
 const {generateTesoTheme}=load("theme/tesoThemeEngine.ts");
 const approved={es:"GO IA puede cometer errores. Comprueba la información importante antes de tomar decisiones.",en:"GO AI can make mistakes. Check important information before making decisions."};
-function render({lang="es",scheme="light",theme=null,uiScale="estandar"}={}){
-  const react={createElement:(type,props,...children)=>({type,props:{...props,children}})};
+function render({lang="es",scheme="light",theme=null,uiScale="estandar",dismissible=false,visible=true,appearance,state}={}){
+  const react={useState:value=>[state?.dismissed??value,next=>{if(state)state.dismissed=next;}],useEffect:()=>{},createElement:(type,props,...children)=>({type,props:{...props,children}})};
   return load("components/booking-assistant/GoAiLimitNotice.tsx",{
-    react,"react-native":{Text:"Text",View:"View",useColorScheme:()=>scheme},
+    react,"react-native":{Text:"Text",View:"View",TouchableOpacity:"TouchableOpacity",useColorScheme:()=>scheme},
     "@/constants/colors":{default:colors,__esModule:true},
-    "@/contexts/LanguageContext":{useLanguage:()=>({t:key=>translations[lang][key]})},
+    "@/contexts/LanguageContext":{useLanguage:()=>({lang,t:key=>translations[lang][key]})},
     "@/theme/TesoThemeContext":{useTesoThemeOptional:()=>theme},
-  }).GoAiLimitNotice({uiScale});
+  }).GoAiLimitNotice({uiScale,dismissible,visible,appearance});
 }
+
+test("central entry warning has a real close action, leaves no spacer, and matches the light conversation even on dark iOS",()=>{
+ const state={dismissed:false},props={state,dismissible:true,scheme:"dark",appearance:"light"};
+ const tree=render(props),button=tree.props.children.find(node=>node?.type==="TouchableOpacity");
+ assert.equal(tree.props.style.backgroundColor,colors.light.background);assert.ok(button.props.style.minHeight>=44);
+ button.props.onPress();assert.equal(render(props),null);assert.equal(render({visible:false}),null);
+});
 
 test("the permanent notice uses the approved copy in both implemented languages without interactive or network dependencies",()=>{
   for(const lang of Object.keys(approved)){

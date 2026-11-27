@@ -5,7 +5,8 @@ El texto del aviso visual está aprobado por el propietario; este documento no
 constituye aprobación jurídica de unas condiciones completas ni crea un nuevo
 flujo de aceptación. No se han encontrado condiciones específicas de GO IA en
 el MAIN revisado. Este apartado deberá incorporarse a las condiciones que se
-validen, conservando su equivalencia con el aviso permanente de la conversación.
+validen, conservando su equivalencia con el aviso de entrada y el texto
+permanentemente consultable desde la configuración de GO IA.
 
 ## Español
 
@@ -35,9 +36,11 @@ to legal review.
 
 ## Alcance técnico
 
-El aviso se reutiliza en el pie compartido del asistente, debajo del campo de
-conversación y fuera del historial desplazable. Su altura entra en la medición
-del pie que protege la escritura, el micrófono y los controles flotantes.
+En GO IA, el aviso compacto de entrada puede cerrarse y no deja una franja
+reservada. Su texto permanece consultable desde el engranaje de configuración
+y estas condiciones. En los otros asistentes se conserva el aviso existente.
+Su altura entra en la medición del pie que protege la escritura, el micrófono
+y los controles flotantes.
 Usa los idiomas implementados (ES/EN), las paletas existentes, el tema opcional
 y escalado de fuente sin truncamiento ni ventanas emergentes.
 

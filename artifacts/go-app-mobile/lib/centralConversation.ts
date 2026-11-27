@@ -13,9 +13,11 @@ export type CentralConversationDependencies={
     write:(revision:number,messages:CentralMessage[])=>Promise<{revision:number}>};
 };
 export class CentralHistoryConflict extends Error{}
+/** Increment only when a changed disclosure requires a new informed decision. */
+export const CENTRAL_CONSENT_VERSION=1;
 /** Only explicit conversation text is ever transmitted. No GO data/action dispatcher. */
 export class CentralConversation{
-  messages:CentralMessage[]=[];consent=false;remember=false;voice=false;busy=false;speaking=false;completed=false;notice="";ready=false;cloudEnabled=false;
+  messages:CentralMessage[]=[];consent=false;consentReviewed=false;remember=false;voice=true;busy=false;speaking=false;completed=false;notice="";ready=false;cloudEnabled=false;
   usage={inputTokens:0,outputTokens:0,lastLatencyMs:0,measuredCalls:0};
   proposal:CentralProposal|null=null;submitting=false;
   budget:{actualMicroUsd:number;estimatedMaximumMicroUsd:number;chargedMicroUsd:number;remainingMicroUsd:number}|null=null;
@@ -28,8 +30,14 @@ export class CentralConversation{
   private change(){for(const listener of this.listeners)listener();}
   get revision(){return this.epoch;}
   restoreProposal(value:unknown,revision=this.epoch){if(revision!==this.epoch||this.busy||this.submitting)return;this.proposal=value==null?null:centralProposalSchema.parse(value);this.change();}
-  async restore(){const epoch=this.epoch;try{const raw=await this.deps.read(this.key);if(epoch!==this.epoch)return;
-    if(raw){const saved=JSON.parse(raw);if(saved.remember===true&&Array.isArray(saved.messages)&&saved.messages.length<=20){const messages=saved.messages.map((m:unknown)=>centralMessageSchema.parse(m));if(messages.reduce((n:number,m:CentralMessage)=>n+m.text.length,0)<=12000){this.messages=messages;this.remember=true;}}}
+  async restore(){const epoch=this.epoch;try{const [raw,preferences]=await Promise.all([this.deps.read(this.key),this.deps.read(this.key+":preferences")]);if(epoch!==this.epoch)return;
+    const prefs=preferences?JSON.parse(preferences):null;
+    if(prefs&&typeof prefs==="object"&&!Array.isArray(prefs)){
+      this.voice=prefs.voice!==false;this.remember=prefs.remember===true;
+      this.consentReviewed=prefs.consentVersion===CENTRAL_CONSENT_VERSION&&typeof prefs.consent==="boolean";
+      this.consent=this.consentReviewed&&prefs.consent===true;
+    }
+    if(raw){const saved=JSON.parse(raw);if((!prefs||this.remember)&&saved.remember===true&&Array.isArray(saved.messages)&&saved.messages.length<=20){const messages=saved.messages.map((m:unknown)=>centralMessageSchema.parse(m));if(messages.reduce((n:number,m:CentralMessage)=>n+m.text.length,0)<=12000){this.messages=messages;this.remember=true;}}}
   }catch{if(epoch===this.epoch)this.notice="No se pudo recuperar el historial local. No se ha transmitido ningún dato.";}
     finally{if(epoch===this.epoch){this.ready=true;this.change();}}}
   private persist(){const saved=this.remember?JSON.stringify({remember:true,messages:this.messages}):null;
@@ -54,7 +62,7 @@ export class CentralConversation{
     else if(!allowCreate){await this.deps.remove(this.key+":cloud");return;}
     else{const result=await this.deps.cloud.write(0,[...this.messages]);this.cloudRevision=result.revision;}
     await this.deps.write(this.key,JSON.stringify({remember:true,messages:this.messages}));
-    await this.deps.write(this.key+":cloud","true");this.remember=true;this.cloudEnabled=true;this.cloudEpoch++;this.notice="";this.change();
+    await this.deps.write(this.key+":cloud","true");this.remember=true;this.cloudEnabled=true;this.cloudEpoch++;this.notice="";this.persistPreferences();this.change();
   }
   async restoreCloudPreference(){
     if(!this.ready||!this.deps.cloud||await this.deps.read(this.key+":cloud")!=="true")return;
@@ -62,9 +70,11 @@ export class CentralConversation{
     }catch{this.cloudEnabled=false;this.notice="No se pudo recuperar el historial de la cuenta. Se conserva la copia de este dispositivo.";this.change();}
   }
   async disableCloud(){await this.deps.remove(this.key+":cloud");this.cloudEnabled=false;this.cloudEpoch++;this.change();}
-  setConsent(value:boolean){this.consent=value;if(!value)this.interrupt();this.change();}
-  setRemember(value:boolean){if(!this.ready||this.cloudEnabled&&!value)return;this.remember=value;void this.persist();this.change();}
-  setVoice(value:boolean){this.voice=value;if(!value){this.speechEpoch++;this.speaking=false;this.deps.stop();}this.change();}
+  private persistPreferences(){if(!this.ready)return;const saved=JSON.stringify({consentVersion:CENTRAL_CONSENT_VERSION,consent:this.consent,remember:this.remember,voice:this.voice});
+    this.writes=this.writes.then(()=>this.deps.write(this.key+":preferences",saved)).catch(()=>{this.notice="No se pudo guardar la preferencia. Compruébala al volver a entrar.";this.change();});}
+  setConsent(value:boolean){if(!this.ready)return;this.consent=value;this.consentReviewed=true;if(!value)this.interrupt();this.persistPreferences();this.change();}
+  setRemember(value:boolean){if(!this.ready||this.cloudEnabled&&!value)return;this.remember=value;this.persistPreferences();void this.persist();this.change();}
+  setVoice(value:boolean){if(!this.ready)return;this.voice=value;if(!value){this.speechEpoch++;this.speaking=false;this.deps.stop();}this.persistPreferences();this.change();}
   private finish(){this.completed=true;this.change();if(this.completionTimer)clearTimeout(this.completionTimer);this.completionTimer=setTimeout(()=>{this.completed=false;this.completionTimer=null;this.change();},900);}
   interrupt(){this.epoch++;this.speechEpoch++;if(this.completionTimer)clearTimeout(this.completionTimer);this.completionTimer=null;this.completed=false;this.controller?.abort();this.controller=null;this.busy=false;this.speaking=false;this.deps.stop();this.change();}
   clear(){if(this.submitting)return;this.interrupt();this.messages=[];this.proposal=null;this.notice="";

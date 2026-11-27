@@ -9,11 +9,11 @@ export function supportVoiceMessage(message:string){
  return "Dictado no disponible. Puedes escribir.";
 }
 /** An opt-in, dismissible summary. Native voice validation and errors remain intact. */
-export function SupportVoiceNotice({message,attempt}:{message:string;attempt:number}){
+export function SupportVoiceNotice({message,attempt,detailed=false}:{message:string;attempt:number;detailed?:boolean}){
  const [dismissed,setDismissed]=useState("");const key=attempt+":"+message;
  if(!message||dismissed===key)return null;
  return <View testID="support-voice-notice" accessibilityLiveRegion="polite" style={{flexDirection:"row",alignItems:"center",gap:6,paddingLeft:12,marginHorizontal:16,backgroundColor:"#f1f3f4",borderRadius:12}}>
-  <Text style={{flex:1,minWidth:0,color:"#46534c",fontSize:13,lineHeight:18}}>{supportVoiceMessage(message)}</Text>
+  <Text style={{flex:1,minWidth:0,color:"#46534c",fontSize:13,lineHeight:18}}>{detailed?message:supportVoiceMessage(message)}</Text>
   <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar aviso de dictado" onPress={()=>setDismissed(key)} style={{width:44,height:44,alignItems:"center",justifyContent:"center"}}><Feather name="x" size={18} color="#46534c"/></TouchableOpacity>
  </View>;
 }

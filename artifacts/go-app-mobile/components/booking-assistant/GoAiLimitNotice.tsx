@@ -1,19 +1,22 @@
-import React from "react";
-import {Text,View,useColorScheme} from "react-native";
+import React,{useEffect,useState} from "react";
+import {Text,TouchableOpacity,View,useColorScheme} from "react-native";
 import colors from "@/constants/colors";
 import {useLanguage} from "@/contexts/LanguageContext";
 import {useTesoThemeOptional} from "@/theme/TesoThemeContext";
 
-/** A measured footer sibling of the composer, never a dismissible message or overlay. */
-export function GoAiLimitNotice({uiScale="estandar"}:{uiScale?:"compacto"|"estandar"|"grande"}){
-  const {t}=useLanguage(),theme=useTesoThemeOptional(),scheme=useColorScheme();
-  const palette=colors[scheme==="dark"?"dark":"light"];
+/** Measured composer footer; central GO IA can dismiss it and keeps the copy in settings. */
+export function GoAiLimitNotice({uiScale="estandar",dismissible=false,visible=true,appearance}:{uiScale?:"compacto"|"estandar"|"grande";dismissible?:boolean;visible?:boolean;appearance?:"light"}){
+  const {t,lang}=useLanguage(),theme=useTesoThemeOptional(),scheme=useColorScheme();
+  const [dismissed,setDismissed]=useState(false);useEffect(()=>{if(visible)setDismissed(false);},[visible]);
+  const palette=colors[appearance!=="light"&&scheme==="dark"?"dark":"light"];
   const fontSize=Math.max(13,Math.round((uiScale==="grande"?15:13)*(theme?.typography.scale??1)));
-  return <View testID="go-ai-limit-notice" pointerEvents="none" style={{paddingHorizontal:16,paddingTop:4,paddingBottom:6,
-    backgroundColor:theme?.colors.surface??palette.background}}>
+  if(!visible||dismissible&&dismissed)return null;
+  return <View testID="go-ai-limit-notice" pointerEvents={dismissible?"auto":"none"} style={{paddingHorizontal:16,paddingTop:4,paddingBottom:6,flexDirection:"row",alignItems:"center",
+    backgroundColor:appearance==="light"?palette.background:theme?.colors.surface??palette.background}}>
     <Text testID="go-ai-limit-notice-text" accessibilityRole="text" accessible allowFontScaling maxFontSizeMultiplier={0}
-      style={{fontSize,lineHeight:Math.ceil(fontSize*1.4),textAlign:"center",color:theme?.colors.text.primary??palette.secondaryForeground}}>
+      style={{flex:1,fontSize,lineHeight:Math.ceil(fontSize*1.4),textAlign:"center",color:appearance==="light"?palette.secondaryForeground:theme?.colors.text.primary??palette.secondaryForeground}}>
       {t("go_ai_limit_notice")}
     </Text>
+    {dismissible&&<TouchableOpacity testID="go-ai-limit-notice-close" accessibilityRole="button" accessibilityLabel={lang==="en"?"Close AI limitations notice":"Cerrar aviso de limitaciones de IA"} onPress={()=>setDismissed(true)} style={{minWidth:44,minHeight:44,alignItems:"center",justifyContent:"center"}}><Text style={{fontSize:24,color:palette.secondaryForeground}}>×</Text></TouchableOpacity>}
   </View>;
 }

@@ -387,3 +387,14 @@ test('central voice reuses capture with its own consent and ADMIN transport; it 
  await f.render().start();await f.render().stop();assert.equal(f.received[0].text,'Hablemos de ciencia');assert.equal(f.requests.length,0);assert.ok(calls.includes('central-transcribe'));assert.equal(calls[0],'consent');
  const denied=nativeVoiceFixture({voiceOptions:{beforeStart:async()=>{throw Error('Consentimiento requerido');}}});await denied.render().start();assert.equal(denied.permissionRequests.length,0);assert.equal(denied.recorder.starts,0);assert.equal(denied.render().error,'Consentimiento requerido');
 });
+
+test('central local voice never records/uploads audio; final text sends once and interruption discards stale events',async()=>{
+ let callbacks,stops=0,aborts=0;
+ const local={start:async c=>{callbacks=c;c.started();},stop:()=>{stops++;callbacks.ended('Mensaje local');},abort:()=>{aborts++;}};
+ const f=nativeVoiceFixture({voiceOptions:{localRecognition:local,beforeStart:async()=>{}}});
+ await f.render().start();assert.equal(f.render().status,'listening');callbacks.partial('Mensaje');assert.equal(f.render().transcript,'Mensaje');
+ await f.render().stop();assert.equal(stops,1);assert.equal(f.received[0].text,'Mensaje local');assert.equal(f.permissionRequests.length,0);assert.equal(f.recorder.starts,0);assert.equal(f.requests.length,0);
+ await f.render().start();const stale=callbacks;f.render().abort();stale.ended('No enviar');assert.equal(f.received.length,1);assert.ok(aborts>0);
+ const missing=nativeVoiceFixture({voiceOptions:{localRecognition:{...local,start:async()=>{throw Error('Expo Go no incluye reconocimiento de voz directo.');}}}});
+ await missing.render().start();assert.match(missing.render().error,/Expo Go/);assert.equal(missing.recorder.starts,0);assert.equal(missing.requests.length,0);
+});

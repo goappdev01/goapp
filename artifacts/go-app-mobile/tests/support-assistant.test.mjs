@@ -20,6 +20,7 @@ function fixture(respond){
   '@workspace/api-zod':{bookingDockOrder:()=>['menu','attach','go','actions','zone']},'@/lib/bookingAssistant':{assistantApi:async()=>({interpretation:false,transcription:false})},'@/hooks/useGoDockPreference':{useGoDockPreference:()=>({position:'right'})},'@/hooks/useAssistantZoneScope':{useAssistantZoneScope:()=>({ready:true,scope:{userId:'a'}})},
   '@/hooks/useBookingAssistant':{useBookingAssistant:p=>{scopes.push(p);return a;}},'@/hooks/useGoActions':{useGoActions:(_,scope)=>{scopes.push({actionScope:scope});return{manager:{state:null},choices:[],dispatch:(...v)=>dispatched.push(v)};}},
   '@/hooks/useBookingVoice':{useBookingVoice:(callback,configuration)=>{receive=callback;options=configuration;return{status:'idle',error:'',transcript:'',abort(){},start(){},stop(){}};}}};
+ modules['@/components/ai/GoAiIdentity']={GoAiIdentity:'GoAiIdentity'};modules['@/lib/goAiVisualState']={assistantActivity:()=> 'idle'};modules['./GoAiLimitNotice']={GoAiLimitNotice:'GoAiLimitNotice'};
  const context={exports:{},require:n=>{if(n in modules)return modules[n];throw Error(n);}};
  vm.runInNewContext(ts.transpileModule(readFileSync('components/booking-assistant/BookingAssistantScreen.tsx','utf8'),{compilerOptions:{esModuleInterop:false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,context);
  const props={visible:true,onClose:()=>closed.push(true),consultation:{scopeKey:'support:a',title:'Comunicar incidencia',sourceText:'Borrador original',respond,onAcceptDraft:(...v)=>accepted.push(v)}};
@@ -57,4 +58,20 @@ test('approved assistant keeps GO then close above the editor on the dominant si
 test('support message send is disabled without a real responder; a configured responder can answer without sending any form',async()=>{
  const f=fixture();f.render();let tree=f.render();input(tree).props.onChangeText('Consulta');tree=f.render();assert.equal(send(tree).props.disabled,true);
  let calls=0;f.props.consultation={...f.props.consultation,respond:async()=>{calls++;return{answer:'Respuesta autorizada'};}};tree=f.render();assert.equal(send(tree).props.disabled,false);send(tree).props.onPress();await tick();assert.equal(calls,1);assert.equal(f.dispatched.length,0);assert.equal(f.accepted.length,0);
+});
+
+test('central GO sits above back in one mirrored draggable column; preferences only mount inside the opened gear panel',()=>{
+ for(const handedness of ['left','right']){
+  const f=fixture(async()=>({answer:'Respuesta'}));f.props.handedness=handedness;
+  f.props.consultation={...f.props.consultation,navigationKey:'central-assistant',compactConversation:true,settings:'Account settings'};
+  f.render();let tree=f.render();
+  const group=nodes(tree).find(n=>n.props.testID==='support-assistant-thumb-controls'),floating=nodes(tree).find(n=>n.type==='GoNavigationFloating');
+  assert.equal(group.props.style.flexDirection,'column');assert.equal(group.props.style.alignItems,'center');assert.equal(group.children[1].type,'GoCloseButton');
+  assert.equal(floating.props.width,64);assert.equal(floating.props.height,136);assert.equal(floating.props.handedness,handedness);
+  assert.equal(nodes(tree).some(n=>n.props.testID==='central-ai-settings-panel'),false);
+  const warning=nodes(tree).find(n=>n.type==='GoAiLimitNotice');assert.equal(warning.props.dismissible,true);assert.equal(warning.props.appearance,'light');
+  nodes(tree).find(n=>n.props.testID==='central-ai-settings-toggle').props.onPress();tree=f.render();
+  assert.ok(nodes(tree).find(n=>n.props.testID==='central-ai-settings-panel'));assert.equal(nodes(tree).find(n=>n.type==='GoNavigationFloating').props.pointerEvents,'none');
+  nodes(tree).find(n=>n.props.testID==='central-ai-settings-toggle').props.onPress();tree=f.render();assert.equal(nodes(tree).some(n=>n.props.testID==='central-ai-settings-panel'),false);
+ }
 });
