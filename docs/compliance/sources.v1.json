@@ -1,0 +1,34 @@
+{
+  "version": "2026-11-27.1",
+  "checkedAt": "2026-11-27",
+  "sources": [
+    {"id":"GDPR","kind":"binding-current","title":"Reglamento (UE) 2016/679","url":"https://eur-lex.europa.eu/eli/reg/2016/679/oj","articles":"5–9, 12–22, 24–25, 28, 30, 32–37, 44–49"},
+    {"id":"LOPDGDD","kind":"binding-current","title":"LO 3/2018, texto consolidado consultado","url":"https://www.boe.es/buscar/act.php?id=BOE-A-2018-16673","articles":"5–7, 11–18, 28, 32, 34, 84, 92"},
+    {"id":"AI-ACT","kind":"binding-current","title":"Reglamento (UE) 2024/1689 consolidado a 27/07/2026","url":"https://eur-lex.europa.eu/eli/reg/2024/1689/2026-07-27/eng","articles":"2–6, 14, 19, 26–27, 50, 111, 113, anexos I y III"},
+    {"id":"AI-AMENDMENT","kind":"binding-current","title":"Reglamento (UE) 2026/1744: modificación publicada","url":"https://eur-lex.europa.eu/eli/reg/2026/1744/oj","articles":"1 y 4; modifica calendario, entre otras disposiciones"},
+    {"id":"COMMISSION-TIMELINE","kind":"official-guidance","title":"Comisión Europea, calendario actualizado del Reglamento IA","url":"https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act","articles":"Contraste del calendario; prevalecen los actos publicados"},
+    {"id":"AEPD-AGENTS","kind":"official-guidance","title":"Asistentes y agentes de IA: decálogo para personas usuarias, octubre 2026","url":"https://www.aepd.es/guias/decalogo-usuarios-asistentes-agentes-ia.pdf","articles":"Orientación, no ley ni lista de obligaciones universales"},
+    {"id":"AEPD-AGENTIC","kind":"official-guidance","title":"Inteligencia Artificial Agéntica desde la perspectiva de Protección de Datos, febrero 2026","url":"https://www.aepd.es/guias/orientaciones-ia-agentica.pdf","articles":"Orientaciones; determinar obligaciones en RGPD y normas aplicables"},
+    {"id":"AEPD-INTERNAL","kind":"official-guidance","title":"Resumen básico de obligaciones y recomendaciones para la gestión de IAG en la AEPD","url":"https://www.aepd.es/guias/sumario-recomendaciones-iag-aepd.pdf","articles":"Política contextual de la AEPD: no convertirla en obligación general de GO"},
+    {"id":"AEPD-DPIA","kind":"official-guidance","title":"Lista de tratamientos art. 35.4 RGPD, septiembre 2019","url":"https://www.aepd.es/sites/default/files/2019-09/listas-dpia-es-35-4.pdf","articles":"Instrumento del art. 35.4 con efectos para el análisis obligatorio de EIPD; no confundirlo con un decálogo voluntario"},
+    {"id":"EDPB-CONSENT","kind":"official-guidance","title":"Directrices 05/2020, versión 1.1","url":"https://www.edpb.europa.eu/system/files/documents/files/file1/edpb_guidelines_202005_consent_en.pdf","articles":"Interpretación del consentimiento; no crea una base jurídica universal"},
+    {"id":"EDPB-DESIGN","kind":"official-guidance","title":"Directrices 4/2019, versión 2.0, 20/10/2020","url":"https://www.edpb.europa.eu/system/files/documents/files/file1/edpb_guidelines_201904_dataprotection_by_design_and_by_default_v2.0_en.pdf","articles":"Interpretación de privacidad desde diseño y por defecto, art. 25"},
+    {"id":"EDPB-ADM","kind":"official-guidance","title":"Directrices WP251rev.01 respaldadas por EDPB el 25/05/2018","url":"https://www.edpb.europa.eu/documents/guideline/automated-decision-making-and-profiling_en","articles":"Interpretación de decisiones automatizadas y perfilado"},
+    {"id":"LSSI","kind":"binding-current","title":"Ley 34/2002","url":"https://www.boe.es/eli/es/l/2002/07/11/34/con","articles":"10, 20–22, 27–28; aplicabilidad según servicio, comunicación y almacenamiento"},
+    {"id":"ACCESSIBILITY","kind":"binding-current","title":"Ley 11/2023, título I","url":"https://www.boe.es/buscar/act.php?id=BOE-A-2023-11022","articles":"2–3, anexo I y disposición final de entrada en vigor; revisar ámbito y exenciones"},
+    {"id":"DISABILITY-2026","kind":"binding-current","title":"Ley 4/2026, de 1 de octubre","url":"https://www.boe.es/diario_boe/txt.php?id=BOE-A-2026-20528&lang=es","articles":"Modificaciones sobre accesibilidad y no discriminación; revisión específica de aplicabilidad"},
+    {"id":"SPAIN-AI-PROJECT","kind":"legal-review","title":"Dictamen CE-D-2026-518 sobre el proyecto de ley de gobernanza IA","url":"https://www.boe.es/buscar/doc.php?id=CE-D-2026-518&lang=es","articles":"El dictamen de un proyecto no acredita ley aprobada ni vigente"}
+  ],
+  "requirements": [
+    {"id":"data-purpose","status":"binding-current","sources":["GDPR","LOPDGDD"],"scope":"Finalidad, base apropiada, minimización, información y derechos por tratamiento; no se presumen satisfechos."},
+    {"id":"security-scope","status":"binding-current","sources":["GDPR"],"scope":"Autorización, separación, seguridad y responsabilidad proactiva proporcionales."},
+    {"id":"impact-assessment","status":"binding-current","sources":["GDPR","AEPD-DPIA"],"scope":"Analizar EIPD y hacerla antes del tratamiento si procede; no imponerla a cualquier uso de IA."},
+    {"id":"ai-literacy-prohibitions","status":"binding-current","sources":["AI-ACT"],"scope":"Artículos 4–5 según actividad y ámbito; revisar explotación de vulnerabilidad, manipulación y demás prohibiciones."},
+    {"id":"ai-transparency","status":"binding-current","sources":["AI-ACT"],"scope":"Artículo 50 según rol, interacción y contenido; no todo texto requiere idéntica etiqueta."},
+    {"id":"ai-december-transition","status":"binding-future","effectiveAt":"2026-12-02","sources":["AI-AMENDMENT"],"scope":"Nuevas previsiones del art. 5 y transición art. 111.4/50.2; comprobar supuestos de cada sistema."},
+    {"id":"ai-annex-iii","status":"binding-future","effectiveAt":"2027-12-02","sources":["AI-AMENDMENT"],"scope":"Capítulo III secciones 1–3 para alto riesgo art. 6.2/anexo III, con la excepción del art. 6.5."},
+    {"id":"ai-annex-i","status":"binding-future","effectiveAt":"2028-08-02","sources":["AI-AMENDMENT"],"scope":"Capítulo III secciones 1–3 para alto riesgo art. 6.1/anexo I, con la excepción del art. 6.5."},
+    {"id":"agents-practices","status":"official-guidance","sources":["AEPD-AGENTS","AEPD-AGENTIC","EDPB-DESIGN"],"scope":"Apoyar selección de controles; las recomendaciones no activan bloqueos jurídicos automáticos."},
+    {"id":"legal-validation","status":"legal-review","sources":["GDPR","AI-ACT","LOPDGDD","LSSI","ACCESSIBILITY","DISABILITY-2026"],"scope":"Responsables/encargados, contratos, transferencias, conservación, menores, clasificación IA y normativa sectorial requieren validación humana."}
+  ]
+}

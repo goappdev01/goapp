@@ -22,6 +22,7 @@ function load(file, modules, globals = {}) {
     clearTimeout,
     ...globals,
     require(name) {
+      if (name === "@/lib/deviceLocation") return require("./tests/helpers/device-location.cjs")(modules["react-native"]);
       if (name in modules) return modules[name];
       throw new Error("Unexpected import " + name);
     },
@@ -247,6 +248,12 @@ function serviceFixture() {
     },
   };
 }
+test("unreviewed context never reaches remote booking interpretation", async () => {
+  const f = serviceFixture();
+  await assert.rejects(f.api.interpretRequest("Un corte", {...model.emptyBookingRequest(),contacts:["private"]},null,true));
+  assert.equal(f.calls.length,0);
+  assert.equal(f.writes,0);
+});
 test("open discovery applies radius; a named GO business overrides it without geocoding", async () => {
   const f = serviceFixture();
   const request = {
