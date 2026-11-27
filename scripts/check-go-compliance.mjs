@@ -48,5 +48,5 @@ const text=['# Matriz GO por módulo', '',`Versión ${matrix.version} · contras
  '', 'Las pruebas de código son evidencia técnica, no prueba de una base jurídica, EIPD, contratación con proveedores ni validación física.', ''].join('\n');
 const matrixFile=path.join(root,'docs/compliance/MATRIX.md');
 if(process.argv.includes('--write-matrix'))writeFileSync(matrixFile,text);
-else assert.equal(readFileSync(matrixFile,'utf8'),text,'Refresh matrix with node scripts/check-go-compliance.mjs --write-matrix');
+else assert.equal(readFileSync(matrixFile,'utf8').replaceAll('\r\n','\n'),text,'Refresh matrix with node scripts/check-go-compliance.mjs --write-matrix');
 console.log(`GO review inventory: ${modules.size} modules, ${sources.sources.length} official sources. Technical evidence only; no legal certification.`);
