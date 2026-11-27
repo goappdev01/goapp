@@ -51,6 +51,15 @@ test('speaking indicator follows actual audio callbacks and ignores a stopped ol
  a.interrupt();assert.equal(a.speaking,false);assert.equal(a.completed,false);f.speechCallbacks[1].onStart();assert.equal(a.speaking,false);
  await a.respond('Tercera consulta');a.setVoice(false);f.speechCallbacks[2].onStart();assert.equal(a.speaking,false);
 });
+test('previous native replies can be replayed, paused and resumed without a new AI request',async()=>{
+ const f=fixture(),a=f.model('A');let pauses=0,resumes=0;f.deps.pause=async()=>{pauses++;};f.deps.resume=async()=>{resumes++;};
+ await a.restore();a.setConsent(true);a.setVoice(false);await a.respond('Hola');assert.equal(f.spoken.length,0);
+ a.playResponse(1);assert.equal(f.spoken.length,1);assert.equal(f.sent.length,1);
+ f.speechCallbacks[0].onStart();assert.equal(a.speaking,true);await a.pauseSpeech();assert.equal(pauses,1);assert.equal(a.speechPaused,true);
+ await a.resumeSpeech();assert.equal(resumes,1);assert.equal(a.speaking,true);
+ a.setSpeech({rate:2});assert.equal(a.speech.rate,2);a.stopSpeech();assert.equal(a.speechMessageIndex,null);
+ a.playResponse(0);assert.equal(f.spoken.length,1,'user messages cannot be spoken as GO replies');
+});
 test('provider failure preserves context and cannot manufacture a reply or erase remembered text',async()=>{
  const f=fixture(),a=f.model('A');await a.restore();a.setConsent(true);await a.respond('Historia');f.setResponse(async()=>{throw Error('Sin conexión');});await assert.rejects(()=>a.respond('Continúa'),/conexión/);assert.equal(a.messages.length,2);assert.equal(a.busy,false);
 });

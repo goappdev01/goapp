@@ -6,7 +6,7 @@ export function centralSpeechPreferences(value:unknown):CentralSpeechPreferences
   return{locale:typeof v.locale==="string"&&/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(v.locale)?v.locale:null,
     voiceId:typeof v.voiceId==="string"&&v.voiceId.length>0&&v.voiceId.length<=240?v.voiceId:null,
     gender:v.gender==="male"||v.gender==="female"?v.gender:null,
-    rate:typeof v.rate==="number"&&Number.isFinite(v.rate)?Math.max(.5,Math.min(1.5,v.rate)):1};
+    rate:typeof v.rate==="number"&&Number.isFinite(v.rate)?Math.max(.75,Math.min(2,v.rate)):1};
 }
 /** Gender is used only if the native provider actually reports it; never infer from names or pitch. */
 export function deviceVoices(value:unknown):DeviceVoice[]{

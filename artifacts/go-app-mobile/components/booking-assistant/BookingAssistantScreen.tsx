@@ -39,6 +39,7 @@ import { ListeningIndicator, listeningPlacement } from "./ListeningIndicator";
 import { GoAiIdentity } from "@/components/ai/GoAiIdentity";
 import { assistantActivity } from "@/lib/goAiVisualState";
 import { BookingAssistantPanels } from "./BookingAssistantPanels";
+import { GoChatMarkdown } from "./GoChatMarkdown";
 import {
   Action,
   Choice,
@@ -52,7 +53,7 @@ import {
 
 export interface BookingAssistantProps {
   /** Read-only consultation; no booking/task dispatcher or automatic draft replacement. */
-  consultation?:{scopeKey:string;title:string;sourceText:string;cancelRequest?:number;controls?:React.ReactNode;conversationActions?:React.ReactNode;settings?:React.ReactNode;compactConversation?:boolean;messages?:{id:string|number;role:string;text:string}[];voiceOptions?:BookingVoiceOptions;errorMessage?:(error:unknown)=>string;onInterrupt?:()=>void;navigationKey?:string;introduction?:string;respond?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;onAcceptDraft?:(draft:string,baseline:string)=>void;speaking?:boolean;completed?:boolean};
+  consultation?:{scopeKey:string;title:string;sourceText:string;cancelRequest?:number;controls?:React.ReactNode;conversationActions?:React.ReactNode;settings?:React.ReactNode;compactConversation?:boolean;noticeVisible?:boolean;messages?:{id:string|number;role:string;text:string}[];messageAction?:(message:{id:string|number;role:string;text:string})=>React.ReactNode;voiceOptions?:BookingVoiceOptions;errorMessage?:(error:unknown)=>string;onInterrupt?:()=>void;navigationKey?:string;introduction?:string;respond?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;onAcceptDraft?:(draft:string,baseline:string)=>void;speaking?:boolean;completed?:boolean};
   uiScale?: "compacto" | "estandar" | "grande";
   visible: boolean;
   listenRequest?: number;
@@ -89,6 +90,7 @@ export function BookingAssistantScreen({
   const go = useGoActions(a, !consultation&&zoneIdentity.ready ? zoneIdentity.scope : null);
   const [consultationDraft,setConsultationDraft]=useState<string|null>(null),consultationFlight=useRef(false),consultationEpoch=useRef(0);
   const [consultationFailed,setConsultationFailed]=useState(false);
+  const [pendingMessage,setPendingMessage]=useState<string|null>(null),pendingRef=useRef<string|null>(null);
   const consultationCurrent=useRef({visible,key:consultation?.scopeKey});consultationCurrent.current={visible,key:consultation?.scopeKey};
   const [input, setInput] = useState("");
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -113,8 +115,8 @@ export function BookingAssistantScreen({
       void go.dispatch(text, aiEnabled);
     }
   },{requireTranscriptionReady:!!consultation,...consultation?.voiceOptions});
-  useEffect(()=>{if(consultation?.cancelRequest===undefined)return;consultationEpoch.current++;consultationFlight.current=false;a.setBusy("");},[consultation?.cancelRequest]);
-  useEffect(()=>{if(!consultation)return;consultationEpoch.current++;consultationFlight.current=false;setConsultationDraft(null);setConsultationFailed(false);return()=>{consultationEpoch.current++;};},[visible,consultation?.scopeKey]);
+  useEffect(()=>{if(consultation?.cancelRequest===undefined)return;consultationEpoch.current++;consultationFlight.current=false;a.setBusy("");if(pendingRef.current){setInput(pendingRef.current);pendingRef.current=null;setPendingMessage(null);}},[consultation?.cancelRequest]);
+  useEffect(()=>{if(!consultation)return;consultationEpoch.current++;consultationFlight.current=false;setConsultationDraft(null);setConsultationFailed(false);setPendingMessage(null);pendingRef.current=null;return()=>{consultationEpoch.current++;};},[visible,consultation?.scopeKey]);
   useEffect(() => {
     if (!visible) {
       a.invalidate();
@@ -177,12 +179,12 @@ export function BookingAssistantScreen({
     if(!consultation||consultationFlight.current||!text.trim())return;
     if(!consultation.respond){a.setNotice("GO no puede procesar esta consulta ahora. Tu borrador sigue intacto.");return;}
     const key=consultation.scopeKey,source=consultation.sourceText,epoch=++consultationEpoch.current;
-    consultationFlight.current=true;setConsultationFailed(false);a.setBusy("Consultando GO…");a.setNotice("");
+    consultationFlight.current=true;pendingRef.current=text;setPendingMessage(text);setInput("");followEnd.current=true;setConsultationFailed(false);a.setBusy("Consultando GO…");a.setNotice("");
     try{const result=await consultation.respond(text,source);
       if(epoch!==consultationEpoch.current||!consultationCurrent.current.visible||consultationCurrent.current.key!==key)return;
       if(typeof result.answer!=="string"||!result.answer.trim()||result.answer.length>8000||result.draft!==undefined&&(typeof result.draft!=="string"||result.draft.length>4000))throw Error("Respuesta inválida");
-      a.say(text,"user");a.say(result.answer);setConsultationDraft(consultation.onAcceptDraft?result.draft??null:null);setInput("");
-    }catch(error){if(epoch===consultationEpoch.current&&consultationCurrent.current.visible){setConsultationFailed(true);a.setNotice(consultation.errorMessage?.(error)??"No se pudo completar la consulta. Conservamos el texto.");}}
+      a.say(text,"user");a.say(result.answer);setConsultationDraft(consultation.onAcceptDraft?result.draft??null:null);pendingRef.current=null;setPendingMessage(null);
+    }catch(error){if(epoch===consultationEpoch.current&&consultationCurrent.current.visible){setConsultationFailed(true);pendingRef.current=null;setPendingMessage(null);setInput(text);a.setNotice(consultation.errorMessage?.(error)??"No se pudo completar la consulta. Conservamos el texto.");}}
     finally{if(epoch===consultationEpoch.current){consultationFlight.current=false;a.setBusy("");}}
   }
   function close(toLanding = false) {
@@ -328,12 +330,12 @@ export function BookingAssistantScreen({
           { paddingTop: insets.top, paddingBottom: keyboardVisible ? 0 : insets.bottom },
         ]}
       >
-        <View style={s.header} onLayout={event => setHeaderHeight(event.nativeEvent.layout.height)}>
-          <View style={{ flex: 1 }}>
+        <View testID={consultation?.compactConversation?"central-ai-minimal-header":undefined} style={[s.header,consultation?.compactConversation&&{paddingVertical:2,minHeight:48,justifyContent:handedness==="left"?"flex-start":"flex-end"}]} onLayout={event => setHeaderHeight(event.nativeEvent.layout.height)}>
+          {!consultation?.compactConversation&&<View style={{ flex: 1 }}>
             <Text style={s.eyebrow}>GO · ASISTENTE</Text>
             <Text style={s.title}>{consultation?.title??"¿Qué necesitas hacer?"}</Text>
-          </View>
-          {!a.panel && (a.phase === "review" || onBack) && (
+          </View>}
+          {!consultation?.compactConversation&&!a.panel && (a.phase === "review" || onBack) && (
             <GoCloseButton
               level="panel"
               accessibilityLabel="Retroceder un paso"
@@ -359,7 +361,7 @@ export function BookingAssistantScreen({
           <ScrollView
             ref={scroll}
             style={{ flex: 1 }}
-            contentContainerStyle={[s.conversation, { flexGrow: 1 },!consultation&&[{paddingBottom:navigationHeight+20},handedness==="right"?{paddingRight:68}:{paddingLeft:68}],consultation?.compactConversation&&(handedness==="right"?{paddingRight:goSize+28}:{paddingLeft:goSize+28})]}
+            contentContainerStyle={[s.conversation, { flexGrow: 1 },!consultation&&[{paddingBottom:navigationHeight+20},handedness==="right"?{paddingRight:68}:{paddingLeft:68}],consultation?.compactConversation&&{paddingHorizontal:12,gap:8}]}
             bounces={false}
             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
             keyboardShouldPersistTaps="handled"
@@ -375,7 +377,7 @@ export function BookingAssistantScreen({
               if (followEnd.current) scroll.current?.scrollToEnd({ animated: true });
             }}
           >
-            <View testID="assistant-conversation-content" style={{ gap: s.conversation.gap,paddingBottom:consultation?.compactConversation?goSize+88:consultation?82:0 }} onLayout={event => {
+            <View testID="assistant-conversation-content" style={{ gap:consultation?.compactConversation?8:s.conversation.gap,paddingBottom:consultation?.compactConversation?goSize+88:consultation?82:0 }} onLayout={event => {
               const height = event.nativeEvent.layout.height + s.conversation.padding + s.conversation.paddingBottom;
               setConversationMeasurement(previous => previous.height === height && previous.messages === conversationMessages.length
                 ? previous : { height, messages: conversationMessages.length });
@@ -387,22 +389,27 @@ export function BookingAssistantScreen({
             {conversationMessages.map((message) => (
               <View
                 key={message.id}
+                testID={consultation?.compactConversation?`central-ai-message-${message.role}-${message.id}`:undefined}
                 style={[
                   s.bubble,
                   message.role === "user" ? s.userBubble : s.goBubble,
+                  consultation?.compactConversation&&{maxWidth:"90%",paddingHorizontal:14,paddingVertical:10},
                 ]}
               >
-                <Text style={[s.role, message.role === "user" && s.userText]}>
+                {!consultation?.compactConversation&&<Text style={[s.role, message.role === "user" && s.userText]}>
                   {message.role === "user" ? "TÚ" : "GO"}
-                </Text>
-                <Text
+                </Text>}
+                {consultation?.compactConversation?<GoChatMarkdown text={message.text} color={message.role==="user"?"#FFFFFF":"#174D3C"}/>:<Text
                   style={[s.body, message.role === "user" && s.userText]}
                   selectable
                 >
                   {message.text}
-                </Text>
+                </Text>}
+                {consultation?.messageAction?.(message)}
               </View>
             ))}
+            {consultation&&pendingMessage!==null&&<View testID="central-ai-pending-message" style={[s.bubble,s.userBubble,consultation.compactConversation&&{maxWidth:"90%",paddingHorizontal:14,paddingVertical:10}]}><GoChatMarkdown text={pendingMessage} color="#FFFFFF"/></View>}
+            {consultation&&!!a.busy&&<View testID="central-ai-preparing" accessibilityLiveRegion="polite" style={{flexDirection:"row",alignItems:"center",gap:8,paddingVertical:4}}><ActivityIndicator size="small" color="#174D3C"/><Text style={{color:"#174D3C"}}>GO está preparando la respuesta…</Text></View>}
             {go.manager.state && (
               <View style={s.card}>
                 <Text style={s.sectionTitle}>{go.manager.state.command.operation === "delete" ? "Eliminar tarea" : "Modificar tarea"}</Text>
@@ -764,7 +771,7 @@ export function BookingAssistantScreen({
               disabled={!input.trim() || !!a.busy}
             />}
           </View>
-          <GoAiLimitNotice uiScale={uiScale} visible={visible} dismissible={!!consultation?.compactConversation} appearance={consultation?.compactConversation?"light":undefined}/>
+          <GoAiLimitNotice uiScale={uiScale} visible={visible&&(consultation?.noticeVisible??true)} dismissible={!!consultation?.compactConversation} autoDismissMs={consultation?.noticeVisible===undefined?undefined:7000} appearance={consultation?.compactConversation?"light":undefined}/>
           {!consultation && dock}
           </View>
           {consultation&&<GoNavigationFloating screenKey={consultation.navigationKey??"support-assistant"} pointerEvents={toolsOpen&&!!consultation.settings?"none":"box-none"} safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} keyboardResponsive protectedBottom={footerHeight+(keyboardVisible?10:0)} width={consultation.compactConversation?Math.max(64,goSize):goSize+72} height={consultation.compactConversation?goSize+72:Math.max(64,goSize)}><View testID="support-assistant-thumb-controls" style={{flexDirection:consultation.compactConversation?"column":handedness==="left"?"row-reverse":"row",alignItems:consultation.compactConversation?"center":"flex-end",gap:8}}>

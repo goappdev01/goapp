@@ -19,8 +19,11 @@ export function centralConversationFor(userId:string,locale="es-ES"){
       void Speech.getAvailableVoicesAsync().then(voices=>centralSpeechOptions(deviceVoices(voices),prefs,state.locale))
         .catch(()=>({language:prefs.locale??state.locale,rate:prefs.rate})).then(options=>{
           // Enumeration may finish after interruption, revocation or a session change.
-          if(epoch!==state.speechEpoch||!state.model.consent||!state.model.voice)return;
-          try{Speech.speak(text,{...options,onStart,onDone,onStopped:onDone,onError});}catch{onError();}
+          if(epoch!==state.speechEpoch)return;
+          const spoken=text.replace(/```[^\n]*\n?/g,"").replace(/\[([^\]]+)\]\([^)]+\)/g,"$1")
+            .replace(/(?:\*\*|__|\*|_|`)/g,"").replace(/^\s{0,3}#{1,6}\s+/gm,"").replace(/^\s*[-+]\s+/gm,"");
+          try{Speech.speak(spoken,{...options,onStart,onDone,onStopped:onDone,onError});}catch{onError();}
         });},stop:()=>{state.speechEpoch++;void Speech.stop().catch(()=>{});},
+    pause:()=>Speech.pause(),resume:()=>Speech.resume(),
   });conversations.set(userId,state);return state.model;
 }

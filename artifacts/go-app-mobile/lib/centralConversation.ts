@@ -10,6 +10,7 @@ export type CentralConversationDependencies={
   confirm?:(id:string)=>Promise<{bookingId:string;status:string}>;
   cancelProposal?:()=>Promise<unknown>;
   speak:(text:string,onStart:()=>void,onDone:()=>void,onError:()=>void)=>void;stop:()=>void;
+  pause?:()=>Promise<void>;resume?:()=>Promise<void>;
   cloud?:{read:()=>Promise<{revision:number;messages:CentralMessage[]}>;
     write:(revision:number,messages:CentralMessage[])=>Promise<{revision:number}>};
 };
@@ -18,7 +19,7 @@ export class CentralHistoryConflict extends Error{}
 export const CENTRAL_CONSENT_VERSION=1;
 /** Only explicit conversation text is ever transmitted. No GO data/action dispatcher. */
 export class CentralConversation{
-  messages:CentralMessage[]=[];consent=false;consentReviewed=false;remember=false;voice=true;busy=false;speaking=false;completed=false;notice="";ready=false;cloudEnabled=false;
+  messages:CentralMessage[]=[];consent=false;consentReviewed=false;remember=false;voice=true;busy=false;speaking=false;speechPaused=false;speechMessageIndex:number|null=null;speechError="";completed=false;notice="";ready=false;cloudEnabled=false;
   speech=centralSpeechPreferences(null);
   usage={inputTokens:0,outputTokens:0,lastLatencyMs:0,measuredCalls:0};
   proposal:CentralProposal|null=null;submitting=false;
@@ -79,10 +80,25 @@ export class CentralConversation{
     this.writes=this.writes.then(()=>this.deps.write(this.key+":preferences",saved)).catch(()=>{this.notice="No se pudo guardar la preferencia. Compruébala al volver a entrar.";this.change();});}
   setConsent(value:boolean){if(!this.ready)return;this.consent=value;this.consentReviewed=true;if(!value)this.interrupt();this.persistPreferences();this.change();}
   setRemember(value:boolean){if(!this.ready||this.cloudEnabled&&!value)return;this.remember=value;this.persistPreferences();void this.persist();this.change();}
-  setVoice(value:boolean){if(!this.ready)return;this.voice=value;if(!value){this.speechEpoch++;this.speaking=false;this.deps.stop();}this.persistPreferences();this.change();}
+  setVoice(value:boolean){if(!this.ready)return;this.voice=value;if(!value)this.stopSpeech();this.persistPreferences();this.change();}
   setSpeech(value:Partial<CentralSpeechPreferences>){if(!this.ready)return;this.speech=centralSpeechPreferences({...this.speech,...value});this.persistPreferences();this.change();}
+  private startSpeech(text:string,index:number,epoch=this.epoch){
+    this.stopSpeech();const token=++this.speechEpoch;this.speechMessageIndex=index;this.speechError="";this.change();
+    this.deps.speak(text,
+      ()=>{if(epoch===this.epoch&&token===this.speechEpoch){this.speaking=true;this.change();}},
+      ()=>{if(epoch===this.epoch&&token===this.speechEpoch){this.speaking=false;this.speechPaused=false;this.speechMessageIndex=null;this.finish();}},
+      ()=>{if(epoch===this.epoch&&token===this.speechEpoch){this.speaking=false;this.speechPaused=false;this.speechMessageIndex=null;this.speechError="No se pudo reproducir la respuesta. Puedes leerla en el chat.";this.change();}});
+  }
+  playResponse(index:number){const message=this.messages[index];if(!message||message.role!=="assistant")return;this.startSpeech(message.text,index);}
+  stopSpeech(){this.speechEpoch++;this.speaking=false;this.speechPaused=false;this.speechMessageIndex=null;this.deps.stop();this.change();}
+  async pauseSpeech(){if(!this.speaking||this.speechMessageIndex===null||!this.deps.pause)return;const token=this.speechEpoch;
+    try{await this.deps.pause();if(token===this.speechEpoch){this.speaking=false;this.speechPaused=true;this.change();}}
+    catch{if(token===this.speechEpoch){this.speechError="Este dispositivo no permite pausar la lectura.";this.change();}}}
+  async resumeSpeech(){if(!this.speechPaused||this.speechMessageIndex===null||!this.deps.resume)return;const token=this.speechEpoch;
+    try{await this.deps.resume();if(token===this.speechEpoch){this.speaking=true;this.speechPaused=false;this.change();}}
+    catch{if(token===this.speechEpoch){this.speechError="Este dispositivo no permite reanudar la lectura.";this.change();}}}
   private finish(){this.completed=true;this.change();if(this.completionTimer)clearTimeout(this.completionTimer);this.completionTimer=setTimeout(()=>{this.completed=false;this.completionTimer=null;this.change();},900);}
-  interrupt(){this.epoch++;this.speechEpoch++;if(this.completionTimer)clearTimeout(this.completionTimer);this.completionTimer=null;this.completed=false;this.controller?.abort();this.controller=null;this.busy=false;this.speaking=false;this.deps.stop();this.change();}
+  interrupt(){this.epoch++;if(this.completionTimer)clearTimeout(this.completionTimer);this.completionTimer=null;this.completed=false;this.controller?.abort();this.controller=null;this.busy=false;this.stopSpeech();this.change();}
   clear(){if(this.submitting)return;const hadProposal=!!this.proposal;this.interrupt();this.messages=[];this.proposal=null;this.notice="";
     if(hadProposal)void this.deps.cancelProposal?.().catch(()=>{this.notice="No se pudo confirmar la retirada de la propuesta. Ninguna reserva se cancela al borrar el chat.";this.change();});
     void this.persist();this.change();}
@@ -123,10 +139,7 @@ export class CentralConversation{
           measuredCalls:this.usage.measuredCalls+1};
       }
       this.messages=[...input,answer];void this.persist();
-      if(this.voice){const speechToken=++this.speechEpoch;this.deps.speak(answer.text,
-        ()=>{if(epoch===this.epoch&&speechToken===this.speechEpoch){this.speaking=true;this.change();}},
-        ()=>{if(epoch===this.epoch&&speechToken===this.speechEpoch){this.speaking=false;this.finish();}},
-        ()=>{if(epoch===this.epoch&&speechToken===this.speechEpoch){this.speaking=false;this.notice="No se pudo reproducir la respuesta. Puedes leerla en el chat.";this.change();}});}
+      if(this.voice)this.startSpeech(answer.text,this.messages.length-1,epoch);
       else this.finish();
       return {answer:answer.text};
     }finally{if(epoch===this.epoch){this.busy=false;this.controller=null;this.change();}}

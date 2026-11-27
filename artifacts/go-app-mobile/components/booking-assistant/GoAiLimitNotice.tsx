@@ -5,9 +5,10 @@ import {useLanguage} from "@/contexts/LanguageContext";
 import {useTesoThemeOptional} from "@/theme/TesoThemeContext";
 
 /** Measured composer footer; central GO IA can dismiss it and keeps the copy in settings. */
-export function GoAiLimitNotice({uiScale="estandar",dismissible=false,visible=true,appearance}:{uiScale?:"compacto"|"estandar"|"grande";dismissible?:boolean;visible?:boolean;appearance?:"light"}){
+export function GoAiLimitNotice({uiScale="estandar",dismissible=false,visible=true,appearance,autoDismissMs}:{uiScale?:"compacto"|"estandar"|"grande";dismissible?:boolean;visible?:boolean;appearance?:"light";autoDismissMs?:number}){
   const {t,lang}=useLanguage(),theme=useTesoThemeOptional(),scheme=useColorScheme();
   const [dismissed,setDismissed]=useState(false);useEffect(()=>{if(visible)setDismissed(false);},[visible]);
+  useEffect(()=>{if(!visible||!dismissible||!autoDismissMs)return;const timer=setTimeout(()=>setDismissed(true),autoDismissMs);return()=>clearTimeout(timer);},[visible,dismissible,autoDismissMs]);
   const palette=colors[appearance!=="light"&&scheme==="dark"?"dark":"light"];
   const fontSize=Math.max(13,Math.round((uiScale==="grande"?15:13)*(theme?.typography.scale??1)));
   if(!visible||dismissible&&dismissed)return null;

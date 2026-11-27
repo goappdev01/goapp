@@ -21,6 +21,7 @@ function fixture(respond){
   '@/hooks/useBookingAssistant':{useBookingAssistant:p=>{scopes.push(p);return a;}},'@/hooks/useGoActions':{useGoActions:(_,scope)=>{scopes.push({actionScope:scope});return{manager:{state:null},choices:[],dispatch:(...v)=>dispatched.push(v)};}},
   '@/hooks/useBookingVoice':{useBookingVoice:(callback,configuration)=>{receive=callback;options=configuration;return{status:'idle',error:'',transcript:'',abort(){},start(){},stop(){}};}}};
  modules['@/components/ai/GoAiIdentity']={GoAiIdentity:'GoAiIdentity'};modules['@/lib/goAiVisualState']={assistantActivity:()=> 'idle'};modules['./GoAiLimitNotice']={GoAiLimitNotice:'GoAiLimitNotice'};
+ modules['./GoChatMarkdown']={GoChatMarkdown:'GoChatMarkdown'};
  const context={exports:{},require:n=>{if(n in modules)return modules[n];throw Error(n);}};
  vm.runInNewContext(ts.transpileModule(readFileSync('components/booking-assistant/BookingAssistantScreen.tsx','utf8'),{compilerOptions:{esModuleInterop:false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,context);
  const props={visible:true,onClose:()=>closed.push(true),consultation:{scopeKey:'support:a',title:'Comunicar incidencia',sourceText:'Borrador original',respond,onAcceptDraft:(...v)=>accepted.push(v)}};
@@ -36,6 +37,19 @@ test('the existing assistant opens a read-only support context and unavailable A
 test('one consultation at a time yields a reviewable proposal; only its explicit accept button returns text',async()=>{
  let release,calls=0;const f=fixture(()=>{calls++;return new Promise(r=>release=r);});f.render();let tree=f.render();input(tree).props.onChangeText('Ordena este texto');tree=f.render();const submit=send(tree).props.onPress;submit();submit();assert.equal(calls,1);assert.equal(f.accepted.length,0);
  release({answer:'Puedes expresarlo así.',draft:'Propuesta para revisar'});await tick();tree=f.render();assert.equal(f.accepted.length,0);const review=nodes(tree).find(n=>n.props.testID==='assistant-draft-review');assert.ok(review);nodes(review).find(n=>n.type==='Action').props.onPress();assert.deepEqual(f.accepted,[['Propuesta para revisar','Borrador original']]);assert.equal(f.closed.length,1);assert.equal(f.dispatched.length,0);
+});
+test('sending appears immediately, clears the composer and restores text after a failed response without a duplicate',async()=>{
+ let reject;const f=fixture(()=>new Promise((_,r)=>reject=r));f.render();let tree=f.render();
+ input(tree).props.onChangeText('Mensaje pendiente');tree=f.render();send(tree).props.onPress();tree=f.render();
+ assert.equal(input(tree).props.value,'');assert.equal(nodes(tree).filter(n=>n.props.testID==='central-ai-pending-message').length,1);
+ assert.equal(nodes(tree).filter(n=>n.props.testID==='central-ai-preparing').length,1);
+ reject(Error('Sin conexión'));await tick();tree=f.render();
+ assert.equal(input(tree).props.value,'Mensaje pendiente');assert.equal(nodes(tree).filter(n=>n.props.testID==='central-ai-pending-message').length,0);
+ assert.equal(f.a.messages.length,0);
+ f.props.consultation={...f.props.consultation,respond:async()=>({answer:'Respuesta recuperada'})};
+ tree=f.render();send(tree).props.onPress();await tick();tree=f.render();
+ assert.equal(input(tree).props.value,'');assert.equal(f.a.messages.length,2);
+ assert.equal(f.a.messages.filter(message=>message.role==='user'&&message.text==='Mensaje pendiente').length,1);
 });
 test('closing or changing account invalidates an in-flight AI reply; failed queries remain editable',async()=>{
  let release;const f=fixture(()=>new Promise(r=>release=r));f.render();let tree=f.render();input(tree).props.onChangeText('Consulta privada');tree=f.render();send(tree).props.onPress();nodes(tree).find(n=>n.type==='GoCloseButton').props.onPress();release({answer:'Respuesta antigua',draft:'Borrador antiguo'});await tick();tree=f.render();assert.equal(nodes(tree).some(n=>n.props.testID==='assistant-draft-review'),false);assert.equal(f.a.messages.length,0);

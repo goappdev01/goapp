@@ -23,7 +23,7 @@ test('voice catalogue only exposes actual identifiers/locales; missing gender is
  const prefs=voice.centralSpeechPreferences({locale:'es-MX',voiceId:'mx-a',rate:1.25});
  assert.deepEqual(JSON.parse(JSON.stringify(voice.centralSpeechOptions(actual,prefs,'es-ES'))),{language:'es-MX',rate:1.25,voice:'mx-a'});
  const absent=voice.centralSpeechOptions(actual,{...prefs,voiceId:'removed-voice'},'es-ES');assert.equal(absent.voice,'mx-a');
- assert.equal(voice.centralSpeechPreferences({rate:50,locale:'javascript:bad'}).rate,1.5);assert.equal(voice.centralSpeechPreferences({locale:'javascript:bad'}).locale,null);
+ assert.equal(voice.centralSpeechPreferences({rate:50,locale:'javascript:bad'}).rate,2);assert.equal(voice.centralSpeechPreferences({locale:'javascript:bad'}).locale,null);
 });
 
 test('conversation and general privacy share one account model; old consent/history and new voice settings persist together',async()=>{
