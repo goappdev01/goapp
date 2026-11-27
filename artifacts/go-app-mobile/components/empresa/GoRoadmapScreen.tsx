@@ -13,6 +13,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { DraggableFAB } from "@/components/DraggableFAB";
 import { GoEticaScreen } from "./GoEticaScreen";
+import { GoEthicsPillarsScreen } from "./GoEthicsPillarsScreen";
+import { ETHICS_PILLARS_KEY, ETHICS_PILLARS_TITLE } from "@/lib/ethicsPillars";
 import { FinancialPlanScreen } from "../financial/FinancialPlanScreen";
 
 // ─── FAB button style — mismo sistema que el resto del ecosistema GO ──────────
@@ -1101,9 +1103,11 @@ function RootInfoModal({ node, onClose, lang }: { node: RoadmapNode | null; onCl
 
 // ─── Helper: pick EN overlay or original ─────────────────────────────────────
 function nodeLabel(node: RoadmapNode, lang: string): string {
+  if (node.key === ETHICS_PILLARS_KEY) return ETHICS_PILLARS_TITLE[lang === "en" ? "en" : "es"];
   return lang === 'en' ? (ROADMAP_LABEL_EN[node.key] ?? node.label) : node.label;
 }
 function nodeDesc(node: RoadmapNode, lang: string): string {
+  if (node.key === ETHICS_PILLARS_KEY) return lang === "en" ? "Initial foundation pending multidisciplinary validation." : node.desc;
   return lang === 'en' ? (ROADMAP_DESC_EN[node.key] ?? node.desc) : node.desc;
 }
 
@@ -1168,6 +1172,7 @@ const ROADMAP_TREE: RoadmapNode[] = [
         key: "etica", emoji: "👽", label: "Ética ❤️👽55👽❤️", color: "#6366f1", progress: 0,
         desc: "Reglas, principios y valores del ecosistema GO.",
         children: [
+          { key: ETHICS_PILLARS_KEY, emoji: "🏛️", label: ETHICS_PILLARS_TITLE.es, color: "#6366f1", progress: 0, desc: "Base inicial pendiente de validación multidisciplinar." },
           { key: "principiosGO",   emoji: "📜", label: "Principios GO",                  color: "#6366f1", progress: 0, desc: "Fundamentos éticos que rigen todo GO." },
           { key: "protVuln",       emoji: "🛡️", label: "Protección personas vulnerables", color: "#6366f1", progress: 0, desc: "Protocolo especial para colectivos sensibles." },
           { key: "transparencia",  emoji: "🔍", label: "Transparencia",                   color: "#6366f1", progress: 0, desc: "Claridad en algoritmos, datos y decisiones." },
@@ -1395,6 +1400,7 @@ export function GoRoadmapScreen({ navStack, setNavStack, onGoLanding, allowFinan
   }
 
   const current = navStack[navStack.length - 1];
+  if (current.key === ETHICS_PILLARS_KEY) return <GoEthicsPillarsScreen />;
   if (current.key === "plan_financiero_y_proyecciones") return allowFinancialPlan ? <FinancialPlanScreen /> : null;
   return (
     <NodeDetail
@@ -1604,10 +1610,13 @@ function NodeDetail({ node, breadcrumb, onOpen, lang, onGoLanding }: {
             const chips  = (child.children ?? []).slice(0, CHIPS_VISIBLE);
             const extras = (child.children?.length ?? 0) - CHIPS_VISIBLE;
 
-            if (hasChildren) {
+            if (hasChildren || child.key === ETHICS_PILLARS_KEY) {
               return (
                 <TouchableOpacity
                   key={child.key}
+                  testID={child.key === ETHICS_PILLARS_KEY ? "ethics-pillars-open" : undefined}
+                  accessibilityRole="button"
+                  accessibilityLabel={nodeLabel(child, lang)}
                   activeOpacity={0.82}
                   onPress={() => onOpen(child)}
                   style={[s.childCard, { borderColor: child.color + "35" }, isRootLevel && { position: "relative" }]}
